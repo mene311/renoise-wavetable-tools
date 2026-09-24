@@ -4,6 +4,13 @@ Build wavetable instruments for Renoise. Load one, hold a note, turn macro 1, an
 sound morphs through the table the way a wavetable oscillator does in Serum or Vital.
 It runs on the sampler, so there's no plugin and no CPU spike.
 
+
+## LFO shapes and modulation sets
+
+The Vital LFO shapes rebuilt as Renoise presets live in [`presets/`](presets): 133 LFO device
+presets and 133 sampler modulation sets. Copy the two folders into your user library and they
+show up in the LFO device and the sampler. See [presets/README.md](presets/README.md).
+
 ## What it does
 
 Renoise has no wavetable oscillator. So each frame ends up as its own sample, all of them

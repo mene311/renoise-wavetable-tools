@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SampleModulationSet doc_version="2">
+  <Devices>
+    <SampleEnvelopeModulationDevice type="SampleEnvelopeModulationDevice">
+      <IsMaximized>true</IsMaximized>
+      <IsSelected>true</IsSelected>
+      <SelectedPresetName>Init</SelectedPresetName>
+      <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
+      <SelectedPresetIsModified>true</SelectedPresetIsModified>
+      <IsActive>
+        <Value>1.0</Value>
+        <Visualization>Device only</Visualization>
+      </IsActive>
+      <Target>Volume</Target>
+      <Operator>+</Operator>
+      <Bipolar>false</Bipolar>
+      <TempoSynced>true</TempoSynced>
+      <SustainIsActive>false</SustainIsActive>
+      <SustainPos>96</SustainPos>
+      <LoopStart>0</LoopStart>
+      <LoopEnd>96</LoopEnd>
+      <LoopMode>Forward</LoopMode>
+      <Decay>
+        <Value>100</Value>
+        <Visualization>Device only</Visualization>
+      </Decay>
+      <Nodes>
+        <PlayMode>Points</PlayMode>
+        <Length>96</Length>
+        <ValueQuantum>0.0</ValueQuantum>
+        <Polarity>Unipolar</Polarity>
+        <Points>
+          <Point>0,0.3623,0.0</Point>
+          <Point>6,1.0000,0.0</Point>
+          <Point>12,0.5847,0.0</Point>
+          <Point>18,1.0000,0.0</Point>
+          <Point>24,0.3721,0.0</Point>
+          <Point>30,1.0000,0.0</Point>
+          <Point>36,0.4354,0.0</Point>
+          <Point>42,1.0000,0.0</Point>
+          <Point>48,0.2784,0.0</Point>
+          <Point>54,1.0000,0.0</Point>
+          <Point>60,0.4745,0.0</Point>
+          <Point>66,1.0000,0.0</Point>
+          <Point>72,0.2982,0.0</Point>
+          <Point>78,1.0000,0.0</Point>
+          <Point>84,0.5009,0.0</Point>
+          <Point>90,1.0000,0.0</Point>
+          <Point>96,1.0000,0.0</Point>
+        </Points>
+      </Nodes>
+    </SampleEnvelopeModulationDevice>
+  </Devices>
+  <Name>Cityscapes</Name>
+  <FilterType>0</FilterType>
+  <FilterBankVersion>3</FilterBankVersion>
+  <FilterDrive>0.0</FilterDrive>
+  <PitchModulationRange>80</PitchModulationRange>
+  <VolumeInputValue>1.0</VolumeInputValue>
+  <PanningInputValue>0.0</PanningInputValue>
+  <PitchInputValue>0.0</PitchInputValue>
+  <CutoffInputValue>127</CutoffInputValue>
+  <ResonanceInputValue>64.9</ResonanceInputValue>
+</SampleModulationSet>
