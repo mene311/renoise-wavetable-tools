@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instrument library</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Wavetable instrument library</h1>
+  <span class="sub">sorted by timbre, built from CC0 and free wavetables</span>
+  <nav><a href="index.html">Builder</a><a href="library.html">Instrument library</a>
+       <a href="https://github.com/mene311/renoise-wavetable-instruments">Repo</a></nav>
+</header>
+
+<main>
+  <div class="panel">
+    <h2>Browse</h2>
+    <div class="opts">
+      <label>Search <input type="text" id="q" placeholder="name or source table" size="26"></label>
+      <label>Category <select id="cat"><option value="">all</option></select></label>
+      <label>Sort
+        <select id="sort">
+          <option value="name">name</option>
+          <option value="bright">brightness</option>
+          <option value="category">category</option>
+        </select>
+      </label>
+      <span id="count" class="dim"></span>
+    </div>
+    <div class="note">
+      Click a row to fetch it and draw the waveform of its first frame. Each instrument is a
+      gate-scan wavetable: macro 1 (<b>WT Position</b>) walks the table.
+    </div>
+  </div>
+
+  <div class="panel" id="detailPanel" style="display:none">
+    <h2 id="detailName">—</h2>
+    <canvas id="detail" height="150"></canvas>
+    <div class="note" id="detailInfo"></div>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead><tr><th>Instrument</th><th>Category</th><th>Source</th><th>Brightness</th><th>Odd</th><th>Slope</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="7" class="dim">loading…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script src="wt-builder.js"></script>
+<script>
+const RAW = "https://raw.githubusercontent.com/mene311/renoise-wavetable-instruments/master/";
+const REPO_RAW = "https://github.com/mene311/renoise-wavetable-instruments/raw/master/instruments/";
+let items = [];
+
+function parseTsv(text) {
+  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim());
+  const head = lines[0].split("\t");
+  return lines.slice(1).map((l) => {
+    const cells = l.split("\t");
+    const row = {};
+    head.forEach((h, i) => { row[h] = cells[i]; });
+    return row;
+  });
+}
+
+async function load() {
+  const [prov, cat] = await Promise.all([
+    fetch(RAW + "provenance.tsv").then((r) => r.text()),
+    fetch(RAW + "catalogue.tsv").then((r) => r.text()),
+  ]);
+  const feats = new Map(parseTsv(cat).map((r) => [r.instrument, r]));
+  items = parseTsv(prov).map((r) => {
+    const f = feats.get(r.instrument) || {};
+    return {
+      instrument: r.instrument,
+      category: r.category,
+      source: (r.source_table || "").split("/").pop(),
+      collection: r.collection,
+      bright: f.bright !== undefined ? Number(f.bright) : NaN,
+      odd: f.odd !== undefined ? Number(f.odd) : NaN,
+      slope: f.slope !== undefined ? Number(f.slope) : NaN,
+    };
+  }).filter((r) => r.instrument && r.instrument.endsWith(".xrni"));
+  const cats = [...new Set(items.map((i) => i.category))].sort();
+  const sel = document.getElementById("cat");
+  for (const c of cats) sel.insertAdjacentHTML("beforeend", "<option>" + c + "</option>");
+  render();
+}
+
+function render() {
+  const q = document.getElementById("q").value.toLowerCase();
+  const cat = document.getElementById("cat").value;
+  const sort = document.getElementById("sort").value;
+  let list = items.filter((i) =>
+    (!cat || i.category === cat) &&
+    (!q || (i.instrument + " " + i.source).toLowerCase().includes(q)));
+  list.sort((a, b) => sort === "bright" ? (b.bright - a.bright)
+    : sort === "category" ? (a.category.localeCompare(b.category) || a.instrument.localeCompare(b.instrument))
+    : a.instrument.localeCompare(b.instrument));
+  document.getElementById("count").textContent = list.length + " of " + items.length + " instruments";
+  const rows = document.getElementById("rows");
+  rows.innerHTML = list.slice(0, 600).map((i, n) => {
+    const url = REPO_RAW + encodeURIComponent(i.category) + "/" + encodeURIComponent(i.instrument);
+    return "<tr data-i='" + items.indexOf(i) + "'>" +
+      "<td>" + i.instrument.replace(/\.xrni$/, "") + "</td>" +
+      "<td><span class='tag'>" + i.category + "</span></td>" +
+      "<td class='dim mono'>" + i.source + "</td>" +
+      "<td class='mono'>" + (isNaN(i.bright) ? "—" : i.bright.toFixed(1)) + "</td>" +
+      "<td class='mono'>" + (isNaN(i.odd) ? "—" : i.odd.toFixed(2)) + "</td>" +
+      "<td class='mono'>" + (isNaN(i.slope) ? "—" : i.slope.toFixed(2)) + "</td>" +
+      "<td><a href='" + url + "' download>get</a></td></tr>";
+  }).join("") || "<tr><td colspan='7' class='dim'>nothing matches</td></tr>";
+  rows.querySelectorAll("tr[data-i]").forEach((tr) => {
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.tagName === "A") return;
+      show(items[Number(tr.dataset.i)]);
+    });
+  });
+}
+
+// zip reading: local file headers, inflate with DecompressionStream when needed
+async function unzip(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const out = new Map();
+  let at = 0;
+  while (at + 30 <= bytes.length && dv.getUint32(at, true) === 0x04034b50) {
+    const method = dv.getUint16(at + 8, true);
+    const size = dv.getUint32(at + 18, true);
+    const nameLen = dv.getUint16(at + 26, true);
+    const extraLen = dv.getUint16(at + 28, true);
+    const name = new TextDecoder().decode(bytes.subarray(at + 30, at + 30 + nameLen));
+    const start = at + 30 + nameLen + extraLen;
+    const data = bytes.subarray(start, start + size);
+    if (method === 0) {
+      out.set(name, data);
+    } else if (typeof DecompressionStream !== "undefined") {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      out.set(name, new Uint8Array(await new Response(stream).arrayBuffer()));
+    }
+    at = start + size;
+  }
+  return out;
+}
+
+async function show(item) {
+  const url = REPO_RAW + encodeURIComponent(item.category) + "/" + encodeURIComponent(item.instrument);
+  document.getElementById("detailPanel").style.display = "block";
+  document.getElementById("detailName").textContent = item.instrument.replace(/\.xrni$/, "");
+  document.getElementById("detailInfo").textContent = "fetching…";
+  try {
+    const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    const files = await unzip(bytes);
+    const xml = new TextDecoder().decode(files.get("Instrument.xml") || new Uint8Array());
+    const frames = [...files.keys()].filter((k) => k.startsWith("SampleData/")).sort();
+    const first = frames[0] ? files.get(frames[0]) : null;
+    let cycle = [];
+    if (first) {
+      const wav = WT.parseWav(first);
+      cycle = Array.from(wav.samples);
+    }
+    const base = (xml.match(/<BaseNote>(\d+)<\/BaseNote>/) || [])[1] || "?";
+    const fin = (xml.match(/<Finetune>(-?\d+)<\/Finetune>/) || [])[1] || "?";
+    const loops = (xml.match(/<LoopMode>(\w+)<\/LoopMode>/) || [])[1] || "?";
+    const sweep = /<CustomDeviceName>SWEEP</.test(xml);
+    document.getElementById("detailInfo").innerHTML =
+      frames.length + " frames · cycle " + cycle.length + " samples · BaseNote " + base +
+      " · Finetune " + fin + "¢ · loop " + loops +
+      (sweep ? " · sweep template present" : "") +
+      "<br><span class='dim'>" + item.collection + " · " + item.source + "</span>";
+    const ratio = window.devicePixelRatio || 1;
+    const canvas = document.getElementById("detail");
+    canvas.width = canvas.clientWidth * ratio; canvas.height = 150 * ratio;
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = "#7dd3a0"; ctx.lineWidth = 1.5 * ratio;
+    ctx.beginPath();
+    for (let i = 0; i < cycle.length; i++) {
+      const x = (i / (cycle.length - 1)) * W;
+      const y = H / 2 - cycle[i] * (H / 2 - 8);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  } catch (e) {
+    document.getElementById("detailInfo").innerHTML =
+      "<span class='err'>could not read it here: " + e.message + "</span>";
+  }
+}
+
+["q", "cat", "sort"].forEach((id) =>
+  document.getElementById(id).addEventListener("input", render));
+load().catch((e) => {
+  document.getElementById("rows").innerHTML =
+    "<tr><td colspan='7' class='err'>could not load the catalogue: " + e.message + "</td></tr>";
+});
+</script>
+</body>
+</html>

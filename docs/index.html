@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wavetable → Renoise instrument</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Wavetable → Renoise instrument</h1>
+  <span class="sub">drop wavetables, get .xrni files. Nothing is uploaded.</span>
+  <nav><a href="index.html">Builder</a><a href="library.html">Instrument library</a>
+       <a href="https://github.com/mene311/renoise-wavetable-tools">Source</a></nav>
+</header>
+
+<main>
+  <div class="panel">
+    <h2>1. Drop your wavetables</h2>
+    <div class="drop" id="drop">
+      Drop <code>.wav</code> wavetables, Vital <code>.vitaltable</code> or <code>.vital</code> presets here,
+      or click to choose files. One file becomes one instrument.
+    </div>
+    <input type="file" id="files" multiple accept=".wav,.vitaltable,.vital" hidden>
+    <canvas id="preview" height="140" style="display:none;margin-top:16px"></canvas>
+    <div class="note" id="fileinfo">No files selected yet.</div>
+  </div>
+
+  <div class="panel">
+    <h2>2. Options</h2>
+    <div class="opts">
+      <label>Frames
+        <select id="frames">
+          <option value="12" selected>12 (the ceiling)</option>
+          <option value="8">8</option>
+          <option value="6">6</option>
+          <option value="4">4</option>
+          <option value="2">2</option>
+        </select>
+      </label>
+      <label>Frame selection
+        <select id="select">
+          <option value="spectral" selected>spectral (most different)</option>
+          <option value="even">even spacing</option>
+        </select>
+      </label>
+      <label>Cycle length
+        <select id="cycle">
+          <option value="169" selected>169 samples = C-4</option>
+          <option value="338">338 = C-3</option>
+          <option value="675">675 = C-2</option>
+          <option value="1070">1070 = 41 Hz</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="sweep" checked> add the sweep template</label>
+      <label>Name suffix <input type="text" id="suffix" value=" WT" size="8"></label>
+    </div>
+    <div class="opts">
+      <button id="build" disabled>Build instruments</button>
+      <button id="downloadAll" class="secondary" disabled>Download all (.zip)</button>
+      <span id="status" class="dim"></span>
+    </div>
+    <div class="note">
+      Frames per instrument is capped at 12 because Renoise allows twelve voices per note column.
+      Cycle length sets both the register and how much high end a frame can hold: 169 samples sits
+      at C-4 with 84 harmonics, 1070 at 41 Hz with 535.
+    </div>
+  </div>
+
+  <div class="panel" id="resultsPanel" style="display:none">
+    <h2>3. Results</h2>
+    <table>
+      <thead><tr><th>Instrument</th><th>Source</th><th>Frames</th><th>Tuning</th><th>Size</th><th></th></tr></thead>
+      <tbody id="results"></tbody>
+    </table>
+    <div class="note" id="warnings"></div>
+  </div>
+
+  <div class="panel">
+    <h2>What you get</h2>
+    <p>A gate-scan wavetable instrument: one sample slot per frame, a gate LFO per frame whose
+    triangle envelopes add up to 1.0, and macro 1 named <b>WT Position</b> walking the gate
+    positions. Drop the <code>.xrni</code> into
+    <code>~/.local/share/Renoise/User Library/Instruments/</code> (or the equivalent on your
+    platform), load it, hold a note and turn macro 1.</p>
+    <p class="dim">The converter runs entirely in this page: files are read with the File API and
+    the .xrni is assembled here, so nothing leaves your machine.</p>
+  </div>
+</main>
+
+<script src="wt-builder.js"></script>
+<script>
+const WT = window.WTBuilder;
+const drop = document.getElementById("drop");
+const fileInput = document.getElementById("files");
+const preview = document.getElementById("preview");
+const results = [];
+let queued = [];
+
+function fmt(x, d) { return Number(x).toFixed(d === undefined ? 2 : d); }
+
+drop.addEventListener("click", () => fileInput.click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("hover"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("hover"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault(); drop.classList.remove("hover");
+  accept(Array.from(e.dataTransfer.files));
+});
+fileInput.addEventListener("change", () => accept(Array.from(fileInput.files)));
+
+function accept(files) {
+  queued = files.filter((f) => /\.(wav|vitaltable|vital)$/i.test(f.name));
+  document.getElementById("fileinfo").textContent = queued.length
+    ? queued.length + " file(s): " + queued.map((f) => f.name).join(", ")
+    : "Nothing usable dropped. Wanted .wav, .vitaltable or .vital.";
+  document.getElementById("build").disabled = queued.length === 0;
+  preview.style.display = "none";
+  if (queued.length) previewFile(queued[0], Number(document.getElementById("frames").value));
+}
+
+async function previewFile(file, frames) {
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const out = WT.buildFromWavetable({
+      bytes, filename: file.name, name: "preview", frames,
+      select: document.getElementById("select").value,
+      cycleLen: Number(document.getElementById("cycle").value),
+      withSweep: document.getElementById("sweep").checked,
+    });
+    const cycle = out.previewCycle;
+    const ratio = window.devicePixelRatio || 1;
+    preview.width = preview.clientWidth * ratio;
+    preview.height = 140 * ratio;
+    const W = preview.width, H = preview.height;
+    const ctx = preview.getContext("2d");
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = "#7dd3a0";
+    ctx.lineWidth = 1.5 * ratio;
+    ctx.beginPath();
+    for (let i = 0; i < cycle.length; i++) {
+      const x = (i / (cycle.length - 1)) * W;
+      const y = H / 2 - cycle[i] * (H / 2 - 8);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    preview.style.display = "block";
+    document.getElementById("fileinfo").textContent =
+      file.name + ": " + out.report.tableFrames + " frames in the table, " +
+      out.report.frames + " used, drawn here is frame 1";
+  } catch (e) {
+    preview.style.display = "none";
+  }
+}
+
+document.getElementById("build").addEventListener("click", async () => {
+  const status = document.getElementById("status");
+  const tbody = document.getElementById("results");
+  tbody.innerHTML = "";
+  results.length = 0;
+  document.getElementById("resultsPanel").style.display = "block";
+  const frames = Number(document.getElementById("frames").value);
+  const select = document.getElementById("select").value;
+  const cycleLen = Number(document.getElementById("cycle").value);
+  const withSweep = document.getElementById("sweep").checked;
+  const suffix = document.getElementById("suffix").value;
+  const warnings = [];
+  let done = 0;
+  for (const file of queued) {
+    status.textContent = "building " + (++done) + "/" + queued.length + "…";
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const base = file.name.replace(/\.[^.]+$/, "");
+      const out = WT.buildFromWavetable({
+        bytes, filename: file.name, name: base + suffix,
+        frames, select, cycleLen, withSweep,
+      });
+      const blob = new Blob([out.xrni], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const name = base + suffix + ".xrni";
+      results.push({ name, blob, url, report: out.report });
+      const r = out.report;
+      const row = document.createElement("tr");
+      row.innerHTML = "<td>" + name + "</td><td class='dim'>" + file.name +
+        " <span class='tag'>" + r.kind + "</span></td><td>" + r.frames + " × " + r.cycleLen +
+        "</td><td class='mono'>BaseNote " + r.tuning.baseNote + ", " + (r.tuning.finetune >= 0 ? "+" : "") +
+        r.tuning.finetune + "¢</td><td>" + Math.round(blob.size / 1024) + " KB</td>" +
+        "<td><a href='" + url + "' download='" + name + "'>download</a></td>";
+      tbody.appendChild(row);
+      if (r.cycles > 1) warnings.push(name + ": frames hold " + r.cycles + " cycles, so it will sound sharp.");
+      if (r.tuning.noteClamped || r.tuning.centsClamped) warnings.push(name + ": tuning was clamped to the note range.");
+      if (r.tableFrames < frames) warnings.push(name + ": only " + r.tableFrames + " frames in the table, so " + r.tableFrames + " were used.");
+    } catch (e) {
+      const row = document.createElement("tr");
+      row.innerHTML = "<td class='err'>" + file.name + "</td><td colspan='5' class='err'>" + e.message + "</td>";
+      tbody.appendChild(row);
+    }
+  }
+  document.getElementById("warnings").innerHTML = warnings.length
+    ? warnings.map((w) => "<div class='warn'>" + w + "</div>").join("")
+    : "";
+  status.textContent = "built " + results.length + " of " + queued.length;
+  document.getElementById("downloadAll").disabled = results.length === 0;
+});
+
+document.getElementById("downloadAll").addEventListener("click", () => {
+  // a plain store-only zip of the built instruments, assembled with the same writer
+  const blobs = results.map((r) => r.blob);
+  Promise.all(blobs.map((b) => b.arrayBuffer())).then((bufs) => {
+    const zip = WT.zipStore(results.map((r, i) => ({ name: r.name, data: new Uint8Array(bufs[i]) })));
+    const url = URL.createObjectURL(new Blob([zip], { type: "application/zip" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "wavetable-instruments.zip"; a.click();
+  });
+});
+</script>
+</body>
+</html>

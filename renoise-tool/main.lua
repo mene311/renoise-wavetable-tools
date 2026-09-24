@@ -41,9 +41,9 @@ end
 
 -- Read the first sample of the selected instrument as a wavetable and chop it into frames.
 -- Returns frames, info, or nil plus a message.
-local function read_frames(frame_count)
+local function read_frames(frame_count, explicit_sample)
   local song = renoise.song()
-  local sample = song.selected_sample
+  local sample = explicit_sample or song.selected_sample
   if not sample then
     return nil, "Select a sample first (the wavetable you want to convert)."
   end
@@ -88,8 +88,10 @@ local function read_frames(frame_count)
 end
 
 -- Build the instrument and write it out. Returns a report table, or nil plus a message.
-local function build(frame_count, with_sweep, instrument_name, out_path)
-  local frames, info = read_frames(frame_count)
+-- `source` is optional: {sample = renoise.Sample, label = string} to build something other than
+-- the selected sample.
+local function build(frame_count, with_sweep, instrument_name, out_path, source)
+  local frames, info = read_frames(frame_count, source and source.sample)
   if not frames then return nil, info end
 
   local tuning = WTLib.tuning(info.sample_rate, info.frame_length)
@@ -137,9 +139,73 @@ local function build(frame_count, with_sweep, instrument_name, out_path)
   }
 end
 
+local show_result   -- defined below; build_batch (above it) calls it
+
+-- What a batch run can walk over. Song samples are the natural unit: a wavetable is one
+-- sample, and Renoise loads each wavetable file as one sample.
+local function collect_sources(mode)
+  local song = renoise.song()
+  local sources = {}
+  if mode == "sample" then
+    local sample = song.selected_sample
+    if sample then sources[1] = { sample = sample, label = sample.name or "wavetable" } end
+  elseif mode == "instrument" then
+    local instrument = song.selected_instrument
+    if instrument then
+      for _, sample in ipairs(instrument.samples) do
+        if sample.sample_buffer and sample.sample_buffer.has_sample_data then
+          sources[#sources + 1] = { sample = sample, label = sample.name or ("sample " .. #sources) }
+        end
+      end
+    end
+  else -- "song"
+    for _, instrument in ipairs(song.instruments) do
+      for _, sample in ipairs(instrument.samples) do
+        if sample.sample_buffer and sample.sample_buffer.has_sample_data then
+          sources[#sources + 1] = { sample = sample,
+            label = (instrument.name ~= "" and instrument.name or "instrument")
+                    .. " - " .. (sample.name or ("sample " .. #sources)) }
+        end
+      end
+    end
+  end
+  return sources
+end
+
+-- Batch: one instrument per source, written into a folder the user picks.
+local function build_batch(mode, frame_count, with_sweep, suffix, load_first)
+  local sources = collect_sources(mode)
+  if #sources == 0 then
+    renoise.app():show_warning("Nothing to convert in that scope.")
+    return
+  end
+  local folder = renoise.app():prompt_for_path("Choose a folder for the instruments")
+  if not folder or folder == "" then return end
+  local built, failed, first_path = 0, {}, nil
+  for _, source in ipairs(sources) do
+    local name = source.label .. suffix
+    name = name:gsub("[/\\:*?\"<>|]", "-")
+    local path = folder .. "/" .. name .. ".xrni"
+    local report, message = build(frame_count, with_sweep, name, path, source)
+    if report then
+      built = built + 1
+      first_path = first_path or path
+    else
+      failed[#failed + 1] = source.label .. ": " .. tostring(message)
+    end
+  end
+  if first_path and load_first then
+    renoise.app():load_instrument(first_path)
+  end
+  local lines = { built .. " of " .. #sources .. " instruments written to " .. folder }
+  for i = 1, math.min(#failed, 6) do lines[#lines + 1] = failed[i] end
+  if #failed > 6 then lines[#lines + 1] = ("… and %d more failures"):format(#failed - 6) end
+  show_result(nil, table.concat(lines, "\n"))
+end
+
 -------------------------------------------------------------------------------- the dialog
 
-local function show_result(report, message)
+show_result = function(report, message)
   local text = {}
   if message then text[#text + 1] = message end
   if report then
@@ -187,6 +253,9 @@ local function on_run()
     items = { "2", "3", "4", "6", "8", "12" },
     value = suggested_index,       -- the popup's value is the selected INDEX, not the label
   }
+  local SCOPE_CHOICES = { "the selected sample", "every sample in this instrument", "every instrument in the song" }
+  local SCOPE_MODES = { "sample", "instrument", "song" }
+  local scope_popup = vb:popup { items = SCOPE_CHOICES, value = 1 }
   local sweep_check = vb:checkbox { value = false }
   local load_check = vb:checkbox { value = true }
   local name_field = vb:textfield {
@@ -212,6 +281,7 @@ local function on_run()
         vb:text { text = "  (12 is the ceiling in Renoise)", width = 200 },
       },
     },
+    vb:row { views = { vb:text { text = "Convert:", width = 70 }, scope_popup } },
     vb:row { views = { vb:text { text = "Name:", width = 70 }, name_field } },
     vb:row { views = { sweep_check, vb:text { text = "  add the sweep template (LFO, Hydra, macros, reset)" } } },
     vb:row { views = { load_check, vb:text { text = "  load the instrument when it is written" } } },
@@ -235,6 +305,15 @@ local function on_run()
             renoise.app():load_instrument(path)
           end
           show_result(report)
+        end
+      },
+      vb:button {
+        text = "Build all…",
+        width = 110,
+        notifier = function()
+          build_batch(SCOPE_MODES[scope_popup.value] or "sample",
+                      FRAME_CHOICES[frame_popup.value] or suggested,
+                      sweep_check.value, " WT", true)
         end
       },
       vb:button {
