@@ -6,3 +6,10 @@ out/
 *.wav
 *.flac
 wt_build_manifest.json
+
+# the cloud builder needs the example table committed
+!wavetables/*.wav
+!wavetables/*.flac
+!wavetables/*.vitaltable
+!wavetables/*.vital
+!wavetables/*.npy
