@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+out/
+*.xrni
+!template_clean.xrni
+*.wav
+*.flac
+wt_build_manifest.json
