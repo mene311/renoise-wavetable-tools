@@ -293,6 +293,69 @@ def encode_flac(frames_i16, sr, dst):
 
 
 
+GAINER_TPL = """          <GainerDevice type="GainerDevice">
+            <SelectedPresetName>Init</SelectedPresetName>
+            <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
+            <SelectedPresetIsModified>false</SelectedPresetIsModified>
+            <CustomDeviceName>GAIN</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </IsActive>
+            <Volume>
+              <Value>1.0</Value>
+              <Visualization>Mixer and Device</Visualization>
+            </Volume>
+            <Panning>
+              <Value>0.5</Value>
+              <Visualization>Device only</Visualization>
+            </Panning>
+            <LPhaseInvert>false</LPhaseInvert>
+            <RPhaseInvert>false</RPhaseInvert>
+            <SmoothParameterChanges>true</SmoothParameterChanges>
+          </GainerDevice>
+"""
+
+FILTER_TPL = """          <AnalogFilterDevice type="AnalogFilterDevice">
+            <SelectedPresetName>Init</SelectedPresetName>
+            <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
+            <SelectedPresetIsModified>false</SelectedPresetIsModified>
+            <CustomDeviceName>LP FILTER</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </IsActive>
+            <OversamplingFactor>2x</OversamplingFactor>
+            <Model>2P K35</Model>
+            <Type>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </Type>
+            <Cutoff>
+              <Value>1.0</Value>
+              <Visualization>Mixer and Device</Visualization>
+            </Cutoff>
+            <Resonance>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </Resonance>
+            <Inertia>
+              <Value>0.0078125</Value>
+              <Visualization>Device only</Visualization>
+            </Inertia>
+            <Drive>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </Drive>
+            <ShowResponseView>true</ShowResponseView>
+            <ResponseViewMaxGain>18</ResponseViewMaxGain>
+          </AnalogFilterDevice>
+"""
+
 SWEEP_LFO_TPL = """          <LfoDevice type="LfoDevice">
             <SelectedPresetName>Init</SelectedPresetName>
             <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
@@ -347,17 +410,16 @@ SWEEP_LFO_TPL = """          <LfoDevice type="LfoDevice">
 """
 
 
-def sweep_rig(gate_lfo_count, rate=8.0, macro_name="WT Position"):
-    """The in-instrument sweep: one shaped LFO -> Hydra -> the instrument's macros.
+def sweep_rig(lfo_idx=3, hydra_idx=4, macro_idx=5, rate=8.0):
+    """The rig that lives in the SUM chain, next to the gain and filter:
 
-    Device index 0 of the GATES chain is its SampleMixer, 1..N are the gate LFOs, so the
-    rig lands after them: N+1 SWEEP, N+2 HYDRA, N+3 INSTR MACRO. Macro 1 is already mapped
-    to the gate positions, so the Hydra sweeping macro 1 walks the table and macros 2-8 are
-    left for the user to map.
+        0 MIXER (already there)  1 GAIN  2 LP FILTER  3 SWEEP  4 HYDRA -> MACROS  5 INSTR MACRO
+
+    One shaped LFO drives the Hydra, the Hydra's eight outputs land on macros 1-8 of the
+    instrument. Macro 1 is already mapped to the frame gates, so it walks the table, and
+    macros 2-8 are free for the user to map onto the gain and filter sitting right there.
     """
-    rig_base = gate_lfo_count + 1                    # device index of SWEEP
-    hydra_idx = rig_base + 1
-    macro_idx = rig_base + 2
+    # device indices arrive as arguments: 3 SWEEP, 4 HYDRA, 5 INSTR MACRO
     shape = [abs(1 - 2 * (i / 15.0)) for i in range(16)]
     pts = "\n".join(f"                <Point>{i},{v:.4f},0.0</Point>" for i, v in enumerate(shape))
     lfo = SWEEP_LFO_TPL.format(dest_effect=hydra_idx, dest_param=3, rate=rate,
@@ -385,8 +447,7 @@ def sweep_rig(gate_lfo_count, rate=8.0, macro_name="WT Position"):
             </InputValue>
 """
     for i in range(1, 10):
-        eff = macro_idx if i <= gate_lfo_count - gate_lfo_count + 8 else -1
-        par = i if i <= 8 else -1
+        eff, par = (macro_idx, i) if i <= 8 else (-1, -1)
         hydra += f"""            <Out{i}DestTrack>
               <Value>-1</Value>
               <Visualization>Device only</Visualization>
@@ -801,13 +862,19 @@ def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
                                         amp=f"{gate_amp:g}", offset=f"{gate_offset:g}",
                                         length=L, points="\n".join(pts)))
     if with_sweep:
-        gate_devs.append(sweep_rig(n, rate=sweep_rate))
-    chains.append((f"GATES", "\n".join(gate_devs)))
+        sum_devs = MIXER_TPL.format(name="Mixer", volume="1.0") + GAINER_TPL + FILTER_TPL + sweep_rig(rate=sweep_rate)
+    else:
+        sum_devs = MIXER_TPL.format(name="Mixer", volume="1.0")
+    chains.append(("GATES", "\n".join(gate_devs)))
     for i in range(n):
         chains.append((f"FRAME {i+1:02d}",
                        MIXER_TPL.format(name="Mixer", volume=f"{base_volume:g}")
                        + SEND_TPL.format(dest=sum_idx)))
-    chains.append(("SUM", MIXER_TPL.format(name="Mixer", volume="1.0")))
+    sum_devs = MIXER_TPL.format(name="Mixer", volume="1.0")
+    if with_sweep:
+        # gain, filter and the sweep rig all live in the SUM chain, next to the mixer
+        sum_devs += GAINER_TPL + FILTER_TPL + sweep_rig(rate=sweep_rate)
+    chains.append(("SUM", sum_devs))
 
     dc_xml = "    <DeviceChains>\n"
     for ci, (nm, devs) in enumerate(chains):
