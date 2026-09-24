@@ -35,7 +35,8 @@ Usage
              --frames 12 --name "Vital Basic Shapes WT" --install
   wt_xrni.py --frames /tmp/frames --name "My WT" -o /tmp/out
 """
-import argparse, base64, json, os, re, shutil, subprocess, sys, tempfile, wave, zipfile
+import argparse, base64, contextlib, io, json, os, re, shutil, subprocess, sys, tempfile, time, wave, zipfile
+import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKELETON = os.path.join(HERE, "template_clean.xrni")
@@ -707,7 +708,18 @@ def write_manifest(out_path, **kw):
     json.dump(entries, open(man, "w"), indent=1)
 
 
-def validate(path):
+def validate(path, fast=False):
+    if fast:
+        import zipfile as _z, xml.etree.ElementTree as _ET
+        try:
+            with _z.ZipFile(path) as z:
+                x = z.read("Instrument.xml")
+                _ET.fromstring(x)
+                n = len([f for f in z.namelist() if f.startswith("SampleData/")])
+            print(f"  structure: ok ({n} embedded samples)")
+        except Exception as e:
+            print(f"  structure: FAILED ({e})")
+        return
     v = os.path.join(HERE, "validate_xrni.py")
     if os.path.exists(v):
         subprocess.run([sys.executable, v, path])
@@ -723,6 +735,98 @@ def validate(path):
             print("  xmllint schema:", "OK" if r.returncode == 0 else "FAIL")
             if r.returncode:
                 print(r.stderr.strip()[:800])
+
+
+def build_source(a):
+    """Build one instrument from the Namespace `a` (a.source / a.name set)."""
+    os.makedirs(a.outdir, exist_ok=True)
+    src = a.source or a.vitaltable or a.wavetable or a.frames
+    if src:
+        cycle = a.cycle_len or a.resample_cycle
+        if a.root == "auto" or a.report:
+            native, _, _ = load_source(src, 0, 0, frame_size=a.frame_size, table=a.table,
+                                       select=a.select, allow_mixed=a.mixed_lengths)
+            clen, bright, want, f0 = auto_root(np.atleast_2d(native), a.target_centroid,
+                                               a.root_min, a.root_max)
+            if a.report:
+                print()
+                root_report(os.path.basename(src), np.atleast_2d(native), clen, bright)
+                print(f"    (unclamped ideal root would be {want:6.2f} Hz)"
+                      + ("  [clamped]" if abs(want - f0) > 1e-6 else ""))
+                print(f"    -> suggested: --cycle-len {clen} --root keep\n")
+                return None
+            cycle = clen
+            print(f"  auto root: brightness {bright:.1f} -> {cycle} samples/cycle "
+                  f"({SR/cycle:.1f} Hz), centroid {bright*SR/cycle:.0f} Hz")
+        frames, sr, cycle = load_source(src, a.n_frames, cycle,
+                                        frame_size=a.frame_size, table=a.table,
+                                        select=a.select, allow_mixed=a.mixed_lengths)
+        if a.lowpass:
+            f0 = sr / float(cycle or len(np.atleast_2d(frames)[0]))
+            frames = lowpass_frames(np.atleast_2d(frames), f0, a.lowpass, a.taper)
+            kept = max(2, int(a.lowpass / max(f0, 1e-9)))
+            print(f"  lowpass: {a.lowpass:.0f} Hz at root {f0:.1f} Hz -> keeping "
+                  f"{kept} harmonics ({kept*f0:.0f} Hz ceiling)")
+    elif a.npy:
+        src = a.npy
+        frames = np.load(a.npy)
+        sr, cycle = SR, len(frames[0])
+    else:
+        raise SystemExit("need --source, --vitaltable, --wavetable, --frames or --npy")
+
+    out = os.path.join(a.outdir, re.sub(r"[^\w. (),-]+", "_", a.name) + ".xrni")
+    build(frames, a.name, sr, cycle, out, spacing=a.spacing, gate_amp=a.gate_amp,
+          gate_offset=a.gate_offset, base_volume=a.base_volume, base_note=a.base_note,
+          finetune=a.finetune, source=src, jobs=a.jobs)
+    validate(out, fast=a.fast)
+    write_manifest(out, name=a.name, source=src, n_frames=len(frames), cycle_len=cycle,
+                   sr=sr, select=a.select, spacing=a.spacing, gate_amp=a.gate_amp,
+                   gate_offset=a.gate_offset, base_volume=a.base_volume)
+    if a.install:
+        dest_dir = os.path.expanduser("~/.local/share/Renoise/User Library/Instruments/Wavetables")
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copy2(out, os.path.join(dest_dir, os.path.basename(out)))
+    return out
+
+
+def run_batch(a):
+    """Build every source listed in --sources-from, in this one process."""
+    import copy, hashlib, time
+    lines = [l.rstrip("\n") for l in open(a.sources_from) if l.strip()]
+    print(f"batch: {len(lines)} sources -> {a.outdir}")
+    seen, built, skipped, failed = set(), 0, 0, 0
+    t0 = time.time()
+    for i, line in enumerate(lines, 1):
+        parts = line.split("\t")
+        src = parts[0].strip()
+        name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else \
+            os.path.splitext(os.path.basename(src))[0]
+        ns = copy.copy(a)
+        ns.source, ns.name, ns.vitaltable, ns.wavetable, ns.frames = src, name, None, None, None
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                nat, _, _ = load_source(src, 6, 0, table=a.table, select=a.select,
+                                        frame_size=a.frame_size, allow_mixed=a.mixed_lengths)
+                sig = hashlib.sha1(np.atleast_2d(nat).round(4).tobytes()).hexdigest()
+        except (Exception, SystemExit):
+            skipped += 1
+            continue
+        if a.dedupe and sig in seen:
+            skipped += 1
+            continue
+        seen.add(sig)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                build_source(ns)
+            built += 1
+            out = buf.getvalue().strip().splitlines()
+            print(f"  [{i}/{len(lines)}] {name:48s} {out[-1] if out else ''}"[:150])
+        except (Exception, SystemExit) as e:
+            failed += 1
+            print(f"  [{i}/{len(lines)}] FAILED {name}: {str(e)[:100]}")
+    print(f"batch done: built {built}, skipped {skipped}, failed {failed}, "
+          f"{time.time()-t0:.0f}s total ({(time.time()-t0)/max(1,built):.2f}s each)")
+    return 0
 
 
 def main():
@@ -741,22 +845,20 @@ def main():
                     help="which table frames to use: evenly spaced, or maximally different (spectral)")
     ap.add_argument("--npy", help=".npy array (n_frames, n_samples)")
     ap.add_argument("--name", help="instrument name (required unless --report)")
-    ap.add_argument("--n-frames", type=int, default=12, help="frames to build from a vitaltable (max 12)")
+    ap.add_argument("--n-frames", type=int, default=12, help="frames to build (max 12)")
     ap.add_argument("--root", choices=["auto", "keep"], default="keep",
-                    help="'auto' picks the cycle length (=root note) from the frames' brightness")
+                    help="'auto' picks the cycle length from the frames' brightness")
     ap.add_argument("--target-centroid", type=float, default=600.0,
-                    help="desired audible centroid in Hz for --root auto (default 600)")
-    ap.add_argument("--root-min", type=float, default=41.2, help="lowest root the auto picker may choose (Hz)")
-    ap.add_argument("--root-max", type=float, default=261.63,
-                    help="highest root the auto picker may choose (Hz; default C-4 — never brighter than that)")
+                    help="desired audible centroid in Hz for --root auto")
+    ap.add_argument("--root-min", type=float, default=41.2, help="lowest root for --root auto (Hz)")
+    ap.add_argument("--root-max", type=float, default=261.63, help="highest root for --root auto (Hz)")
     ap.add_argument("--lowpass", type=float, default=0.0,
-                    help="band-limit the frames to this frequency (Hz) at the chosen root, "
-                         "with a soft rolloff; use it to tame bright growl/bass tables")
+                    help="band-limit the frames to this frequency (Hz) at the chosen root")
     ap.add_argument("--taper", type=float, default=0.5, help="fraction of the kept band that fades out")
-    ap.add_argument("--report", action="store_true", help="print the brightness/root analysis and exit")
+    ap.add_argument("--report", action="store_true", help="print the brightness analysis and exit")
     ap.add_argument("--cycle-len", type=int, default=169,
-                    help="samples per cycle when extracting (169 = C-4 @44.1k)")
-    ap.add_argument("--resample-cycle", type=int, help="band-limit resample frame dirs to this cycle length")
+                    help="samples per cycle (169 = C-4 at 44.1k)")
+    ap.add_argument("--resample-cycle", type=int, help="band-limit resample frame dirs to this length")
     ap.add_argument("--spacing", type=int, default=2, help="envelope lines between gate peaks")
     ap.add_argument("--gate-amp", type=float, default=1.0)
     ap.add_argument("--gate-offset", type=float, default=0.0)
@@ -767,65 +869,19 @@ def main():
     ap.add_argument("-o", "--outdir", default="/tmp/wt_out")
     ap.add_argument("--install", action="store_true",
                     help="copy into 'User Library/Instruments/Wavetables/'")
+    ap.add_argument("--sources-from",
+                    help="batch: file listing sources, one per line, optionally 'path<TAB>name'")
+    ap.add_argument("--dedupe", action="store_true",
+                    help="batch: skip sources whose frame content was already built")
+    ap.add_argument("--fast", action="store_true", help="skip xmllint schema validation")
     a = ap.parse_args()
-    if not a.name and not a.report:
-        ap.error("--name is required unless you are just --report-ing")
-
-    os.makedirs(a.outdir, exist_ok=True)
-    src = a.source or a.vitaltable or a.wavetable or a.frames
-    if src:
-        cycle = a.cycle_len or a.resample_cycle
-        bright = None
-        if a.root == "auto" or a.report:
-            native, _, _ = load_source(src, 0, 0, frame_size=a.frame_size, table=a.table,
-                                       select=a.select, allow_mixed=a.mixed_lengths)
-            import numpy as _np
-            clen, bright, want, f0 = auto_root(_np.atleast_2d(native), a.target_centroid,
-                                               a.root_min, a.root_max)
-            if a.report:
-                print(f"\n{bright and ''}")
-                root_report(os.path.basename(src), _np.atleast_2d(native), clen, bright)
-                print(f"    (unclamped ideal root would be {want:6.2f} Hz)"
-                      + ("  [clamped]" if abs(want - f0) > 1e-6 else ""))
-                print(f"    -> suggested: --cycle-len {clen} --root keep\n")
-                return
-            cycle = clen
-            print(f"  auto root: brightness {bright:.1f} -> {cycle} samples/cycle "
-                  f"({44100/cycle:.1f} Hz), centroid {bright*44100/cycle:.0f} Hz")
-        frames, sr, cycle = load_source(src, a.n_frames, cycle,
-                                        frame_size=a.frame_size, table=a.table, select=a.select,
-                                        allow_mixed=a.mixed_lengths)
-        if a.lowpass:
-            import numpy as _np
-            f0 = sr / float(cycle or len(_np.atleast_2d(frames)[0]))
-            frames = lowpass_frames(_np.atleast_2d(frames), f0, a.lowpass, a.taper)
-            kept = max(2, int(a.lowpass / max(f0, 1e-9)))
-            print(f"  lowpass: {a.lowpass:.0f} Hz at root {f0:.1f} Hz -> keeping "
-                  f"{kept} harmonics ({kept*f0:.0f} Hz ceiling)")
-    elif a.npy:
-        import numpy as np
-        src = a.npy
-        frames = np.load(a.npy)
-        sr, cycle = SR, len(frames[0])
-    else:
-        raise SystemExit("need --vitaltable, --frames or --npy")
-
-    out = os.path.join(a.outdir, re.sub(r"[^\w. (),-]+", "_", a.name) + ".xrni")
-    build(frames, a.name, sr, cycle, out, spacing=a.spacing, gate_amp=a.gate_amp,
-          jobs=a.jobs,
-          gate_offset=a.gate_offset, base_volume=a.base_volume, base_note=a.base_note,
-          finetune=a.finetune, source=src)
-    validate(out)
-    write_manifest(out, name=a.name, source=src, n_frames=len(frames), cycle_len=cycle,
-                   sr=sr, select=a.select, spacing=a.spacing, gate_amp=a.gate_amp,
-                   gate_offset=a.gate_offset, base_volume=a.base_volume)
-    if a.install:
-        dest_dir = os.path.expanduser("~/.local/share/Renoise/User Library/Instruments/Wavetables")
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, os.path.basename(out))
-        shutil.copy2(out, dest)
-        print(f"  installed -> {dest}")
+    if not a.name and not a.report and not a.sources_from:
+        ap.error("--name is required unless you are --report-ing or --sources-from")
+    if a.sources_from:
+        return run_batch(a)
+    build_source(a)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
