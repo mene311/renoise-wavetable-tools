@@ -63,10 +63,17 @@ Folders of single-cycle waves, Vital `.vitaltable` files and `.vital` presets (t
 are in there, base64 encoded), Serum-format `.wav` wavetables, and `.npy` arrays.
 Need the opposite? `vitaltable_to_wav.py` writes a Serum-format `.wav` from a Vital table.
 
+## One caveat
+
+Pitch is only ever as good as the single cycle. A table whose energy sits on a harmonic
+other than the first reads an octave or a twelfth away from the note you play, and playing
+far from the base note shifts the top end. That is what a sampler does with one-cycle
+content, not something the build can fix.
+
 ## Credits
 
 The gating trick came from instruments Kaidiak shared in the Renoise Discord. Renoise
-ships a plainer version of the same idea as `Utility/2, 4, 6 and 12 frame Wavetable Init`.
-No sample content lives in this repo.
+ships a plainer version of the same idea as `Utility/2, 4, 6 and 12 frame Wavetable Init`,
+by slujr (zensphere). Thanks to both. No sample content lives in this repo.
 
 MIT.
