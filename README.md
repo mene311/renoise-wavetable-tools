@@ -88,6 +88,41 @@ Parameter indices inside an instrument chain, read out of working files:
 | LFO | position / Reset | 8 |
 
 
+## No Python? Build them on GitHub
+
+The builder runs in GitHub Actions, so nothing has to be installed locally:
+
+1. Fork this repo.
+2. Drop your wavetables into `wavetables/` — `.vitaltable`, `.vital`, a Serum-style `.wav`, a
+   `.flac` or a `.npy` — and commit. One file becomes one instrument.
+3. **Actions → Build wavetable instruments → Run workflow** (or just push, which triggers it).
+   The run takes a few minutes; when it finishes, download the **instruments** artifact.
+4. Unzip it into `~/.local/share/Renoise/User Library/Instruments/` (Windows:
+   `%APPDATA%\Renoise\V3.5.4\User Library\Instruments`, macOS:
+   `~/Library/Application Support/Renoise/V3.5.4/User Library/Instruments`).
+
+The workflow exposes the useful flags as inputs: frames per instrument, frame selection
+(spectral or even), cycle length (which sets the register), and whether to add the sweep
+template and the gain/filter. It also runs the checker on everything it builds and uploads
+those reference renders alongside.
+
+### Renoise-native alternatives that already exist
+
+If you would rather stay inside Renoise, two community tools cover the neighbouring ground:
+
+- **Paketti** (esaruoho/paketti) concatenates single cycles into one long sample and plays
+  wavetables by crossfading Wave A and Wave B. Random AKWF wavetables at 32/64/128/256 frames,
+  `.wt` import and export, a single-cycle writer.
+- **8chip** (halebop17/8chip) stages up to four single cycles and spreads them across the
+  keyzones.
+
+Both are the crossfade or keyzone approach. What this toolkit does differently is the
+gate-scan architecture: one sample slot per frame, a gate LFO per frame whose triangle
+envelopes add up to 1.0, and one macro that walks the table, which is what Renoise's own
+`Utility/… frame Wavetable Init` templates and the instruments shared in the Trackercorps
+Discord use.
+
+
 ## One caveat
 
 Some instruments play at a different pitch than the key you press. When the loudest part of

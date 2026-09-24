@@ -1,0 +1,101 @@
+name: Build wavetable instruments
+
+# Build Renoise .xrni wavetable instruments in the cloud — no Python install needed.
+#
+# 1. fork this repo (or use it directly if you have write access)
+# 2. drop your wavetables into the wavetables/ folder and commit:
+#      .vitaltable / .vital   Vital wavetables and presets
+#      .wav                   Serum-style wavetables (N frames x 2048 samples)
+#      .npy                   array of frames
+# 3. Actions -> "Build wavetable instruments" -> Run workflow
+# 4. download the "instruments" artifact when the run finishes
+#
+# Every file in the folder becomes one instrument. Pushing to wavetables/ runs it too.
+
+on:
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: "repo folder holding the wavetables"
+        default: "wavetables"
+      frames:
+        description: "frames per instrument (12 is the ceiling in Renoise)"
+        default: "12"
+      select:
+        description: "which table frames to keep"
+        type: choice
+        options: [spectral, even]
+        default: spectral
+      cycle_len:
+        description: "samples per cycle: 169 = C-4, 338 = C-3, 1070 = 41 Hz"
+        default: "169"
+      with_sweep:
+        description: "add the in-instrument sweep template (LFO, Hydra, macros)"
+        type: boolean
+        default: true
+      with_fx:
+        description: "also add a gainer and an analog filter"
+        type: boolean
+        default: false
+  push:
+    paths:
+      - "wavetables/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg and xmllint
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libxml2-utils
+
+      - name: Install numpy
+        run: python3 -m pip install --quiet numpy
+
+      - name: Build a list of instruments to make
+        id: list
+        run: |
+          FOLDER="${{ github.event.inputs.folder || 'wavetables' }}"
+          mkdir -p out
+          if [ ! -d "$FOLDER" ]; then echo "no $FOLDER folder"; exit 1; fi
+          find "$FOLDER" -maxdepth 1 -type f \
+            \( -iname '*.vitaltable' -o -iname '*.vital' -o -iname '*.wav' -o -iname '*.flac' -o -iname '*.npy' \) \
+            -print > /tmp/sources.txt
+          echo "found $(wc -l < /tmp/sources.txt) wavetables"
+          cat /tmp/sources.txt
+
+      - name: Build the instruments
+        run: |
+          if [ ! -s /tmp/sources.txt ]; then echo "nothing to build"; exit 0; fi
+          ARGS="--n-frames ${{ github.event.inputs.frames || '12' }}"
+          ARGS="$ARGS --select ${{ github.event.inputs.select || 'spectral' }}"
+          ARGS="$ARGS --cycle-len ${{ github.event.inputs.cycle_len || '169' }}"
+          if [ "${{ github.event.inputs.with_sweep || 'true' }}" = "true" ]; then ARGS="$ARGS --with-sweep"; fi
+          if [ "${{ github.event.inputs.with_fx }}" = "true" ]; then ARGS="$ARGS --with-fx"; fi
+          python3 wt_xrni.py --sources-from /tmp/sources.txt --dedupe -o out $ARGS
+
+      - name: Verify what was built
+        if: always()
+        run: |
+          for f in out/*.xrni; do
+            [ -e "$f" ] || continue
+            python3 wt_verify.py "$f" --outdir out/verify | tail -1
+          done || true
+
+      - name: Upload the instruments
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instruments
+          path: |
+            out/*.xrni
+            out/verify/*.wav
+          if-no-files-found: warn
+          retention-days: 30
