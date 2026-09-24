@@ -1,7 +1,3 @@
-# Copy this to .github/workflows/build-instruments.yml to enable the cloud builder.
-# It lands here as a template because a token with the `workflow` scope is needed to
-# push files into .github/workflows/ — see the README section "No Python?".
-
 name: Build wavetable instruments
 
 # Build Renoise .xrni wavetable instruments in the cloud — no Python install needed.

@@ -92,10 +92,7 @@ Parameter indices inside an instrument chain, read out of working files:
 
 The builder runs in GitHub Actions, so nothing has to be installed locally:
 
-0. Copy `ci/build-instruments.yml` to `.github/workflows/build-instruments.yml` in your fork
-   (it ships outside `.github/` because pushing workflow files needs a token with the
-   `workflow` scope).
-1. Fork this repo.
+1. Fork this repo (or use it directly).
 2. Drop your wavetables into `wavetables/` — `.vitaltable`, `.vital`, a Serum-style `.wav`, a
    `.flac` or a `.npy` — and commit. One file becomes one instrument.
 3. **Actions → Build wavetable instruments → Run workflow** (or just push, which triggers it).
