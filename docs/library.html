@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Instrument library</title>
-<meta name="description" content="Browse the published gate-scan wavetable instruments by timbre.">
+<meta name="description" content="Browse the published gate-scan wavetable instruments by timbre, view one, or download a batch.">
+<link rel="icon" href="favicon.svg">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,15 +15,16 @@
 </div></div>
 <div class="hero"><div class="hero-inner">
 <h1>Wavetable instrument library</h1>
-<p>Instruments filed by timbre, built from CC0 and free wavetables. Click a row and it'll be fetched and drawn.</p>
+<p>Instruments filed by timbre, built from CC0 and free wavetables. Click a row and it'll be
+fetched and drawn, or take a whole category as a zip.</p>
 </div></div>
 <main>
 
 <div class="panel">
-  <div class="panel-head"><h2>Browse</h2><span class="hint" id="count"></span></div>
+  <div class="panel-head"><h2>Browse</h2><span class="hint" id="count">loading…</span></div>
   <div class="panel-body">
     <div class="opts">
-      <label>Search <input type="text" id="q" placeholder="name or source table" size="24"></label>
+      <label>Search <input type="text" id="q" placeholder="name or source table" size="22"></label>
       <label>Category <select id="cat"><option value="">all</option></select></label>
       <label>Sort
         <select id="sort">
@@ -31,9 +33,24 @@
           <option value="category">category</option>
         </select>
       </label>
+      <label>View
+        <select id="view">
+          <option value="table">table</option>
+          <option value="category">by category</option>
+        </select>
+      </label>
     </div>
-    <div class="note">Macro 1 (<strong>WT Position</strong>) walks the table in every one of these.
-    The <span class="tag">get</span> link downloads the instrument straight from the repository.</div>
+    <div class="opts">
+      <button id="selectAll" class="secondary">Select all shown</button>
+      <button id="clearSel" class="secondary">Clear selection</button>
+      <button id="batch" disabled>Download selected (.zip)</button>
+      <span id="selCount" class="dim">nothing selected</span>
+    </div>
+    <div class="note" id="status">
+      Macro 1 (<strong>WT Position</strong>) walks the table in every one of these. A batch is
+      fetched file by file and zipped in this page, so a few hundred instruments take a moment.
+    </div>
+    <div class="note" id="warnings"></div>
   </div>
 </div>
 
@@ -46,27 +63,68 @@
 </div>
 
 <div class="panel">
-  <div class="panel-head"><h2>Instruments</h2></div>
+  <div class="panel-head"><h2>Instruments</h2><span class="hint" id="shown"></span></div>
   <div class="panel-body">
-    <table class="rows">
-      <thead><tr><th>Instrument</th><th>Category</th><th>Source</th>
-        <th class="num">Bright</th><th class="num">Odd</th><th class="num">Slope</th><th></th></tr></thead>
-      <tbody id="rows"><tr><td colspan="7" class="dim">loading…</td></tr></tbody>
+    <table class="rows" id="table">
+      <thead><tr>
+        <th style="width:26px"><input type="checkbox" id="headCheck" title="select all shown"></th>
+        <th>Instrument</th><th>Category</th><th>Source</th>
+        <th class="num">Bright</th><th class="num">Odd</th><th class="num">Slope</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="8" class="dim">loading…</td></tr></tbody>
     </table>
+    <div id="catview" style="display:none"></div>
   </div>
 </div>
+
 </main>
 <footer>
   <span>gate-scan wavetables for Renoise</span>
   <a href="https://mene311.github.io/renoise-hub/">all my Renoise work</a>
-  <a href="index.html">builder</a>
   <a href="https://github.com/mene311/renoise-wavetable-instruments">repository</a>
 </footer>
 <script src="wt-builder.js"></script>
 <script>
-const RAW = "https://raw.githubusercontent.com/mene311/renoise-wavetable-instruments/master/";
-const REPO_RAW = "https://github.com/mene311/renoise-wavetable-instruments/raw/master/instruments/";
+// wt-builder.js publishes its API as WTBuilder; these pages use the short name.
+const WT = WTBuilder;
+
+// Two CORS-friendly mirrors of the repository. The github.com/.../raw/ URL is not one of
+// them: it answers with a redirect that carries no Access-Control-Allow-Origin, so fetch()
+// dies with a network error even though the file is plainly there.
+const BASES = [
+  "https://raw.githubusercontent.com/mene311/renoise-wavetable-instruments/master/",
+  "https://cdn.jsdelivr.net/gh/mene311/renoise-wavetable-instruments@master/",
+];
 let items = [];
+let filtered = [];
+const selected = new Set();
+let busy = false;
+
+function encPath(path) {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+async function fetchBytes(path) {
+  let last;
+  for (const base of BASES) {
+    try {
+      const r = await fetch(base + encPath(path));
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return new Uint8Array(await r.arrayBuffer());
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw new Error((last && last.message) || "network error");
+}
+
+async function fetchText(path) {
+  return new TextDecoder().decode(await fetchBytes(path));
+}
+
+function fileUrl(item) {
+  return BASES[0] + encPath("instruments/" + item.category + "/" + item.instrument);
+}
 
 function parseTsv(text) {
   const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim());
@@ -81,8 +139,8 @@ function parseTsv(text) {
 
 async function load() {
   const [prov, cat] = await Promise.all([
-    fetch(RAW + "provenance.tsv").then((r) => r.text()),
-    fetch(RAW + "catalogue.tsv").then((r) => r.text()),
+    fetchText("provenance.tsv"),
+    fetchText("catalogue.tsv"),
   ]);
   const feats = new Map(parseTsv(cat).map((r) => [r.instrument, r]));
   items = parseTsv(prov).map((r) => {
@@ -97,94 +155,305 @@ async function load() {
       slope: f.slope !== undefined ? Number(f.slope) : NaN,
     };
   }).filter((r) => r.instrument && r.instrument.endsWith(".xrni"));
-  const cats = [...new Set(items.map((i) => i.category))].sort();
+  const counts = new Map();
+  for (const i of items) counts.set(i.category, (counts.get(i.category) || 0) + 1);
   const sel = document.getElementById("cat");
-  for (const c of cats) sel.insertAdjacentHTML("beforeend", "<option>" + c + "</option>");
+  for (const c of [...counts.keys()].sort()) {
+    sel.insertAdjacentHTML("beforeend",
+      "<option value=\"" + c + "\">" + c + " (" + counts.get(c) + ")</option>");
+  }
   render();
 }
 
-function render() {
-  const q = document.getElementById("q").value.toLowerCase();
+function shortName(i) { return i.instrument.replace(/\.xrni$/, ""); }
+
+function applyFilters() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
   const cat = document.getElementById("cat").value;
   const sort = document.getElementById("sort").value;
-  let list = items.filter((i) =>
+  filtered = items.filter((i) =>
     (!cat || i.category === cat) &&
-    (!q || (i.instrument + " " + i.source).toLowerCase().includes(q)));
-  list.sort((a, b) => sort === "bright" ? (b.bright - a.bright)
+    (!q || (i.instrument + " " + i.source + " " + i.collection).toLowerCase().includes(q)));
+  filtered.sort((a, b) => sort === "bright" ? (b.bright - a.bright)
     : sort === "category" ? (a.category.localeCompare(b.category) || a.instrument.localeCompare(b.instrument))
     : a.instrument.localeCompare(b.instrument));
-  document.getElementById("count").textContent = list.length + " of " + items.length + " instruments";
+}
+
+function render() {
+  applyFilters();
+  document.getElementById("count").textContent =
+    filtered.length + " of " + items.length + " instruments";
+  document.getElementById("shown").textContent =
+    filtered.length === items.length ? "" : filtered.length + " shown";
+  const byCat = document.getElementById("view").value === "category";
+  document.getElementById("table").style.display = byCat ? "none" : "";
+  document.getElementById("catview").style.display = byCat ? "" : "none";
+  document.getElementById("headCheck").checked =
+    filtered.length > 0 && filtered.every((i) => selected.has(i.instrument));
+  byCat ? renderCategories() : renderTable();
+  updateSelectionUi();
+}
+
+function renderTable() {
   const rows = document.getElementById("rows");
-  rows.innerHTML = list.slice(0, 600).map((i, n) => {
-    const url = REPO_RAW + encodeURIComponent(i.category) + "/" + encodeURIComponent(i.instrument);
-    return "<tr class='clickable' data-i='" + items.indexOf(i) + "'>" +
-      "<td>" + i.instrument.replace(/\.xrni$/, "") + "</td>" +
-      "<td><span class='tag'>" + i.category + "</span></td>" +
-      "<td class='dim mono'>" + i.source + "</td>" +
+  const shown = filtered.slice(0, 600);
+  rows.innerHTML = shown.map((i) => {
+    const url = fileUrl(i);
+    return "<tr class='clickable' data-n=\"" + esc(i.instrument) + "\">" +
+      "<td><input type='checkbox' data-check=\"" + esc(i.instrument) + "\"" +
+        (selected.has(i.instrument) ? " checked" : "") + "></td>" +
+      "<td>" + esc(shortName(i)) + "</td>" +
+      "<td><span class='tag'>" + esc(i.category) + "</span></td>" +
+      "<td class='dim'>" + esc(i.source) + "</td>" +
       "<td class='num'>" + (isNaN(i.bright) ? "—" : i.bright.toFixed(1)) + "</td>" +
       "<td class='num'>" + (isNaN(i.odd) ? "—" : i.odd.toFixed(2)) + "</td>" +
       "<td class='num'>" + (isNaN(i.slope) ? "—" : i.slope.toFixed(2)) + "</td>" +
       "<td><a href='" + url + "' download>get</a></td></tr>";
-  }).join("") || "<tr><td colspan='7' class='dim'>nothing matches</td></tr>";
-  rows.querySelectorAll("tr[data-i]").forEach((tr) => {
-    tr.addEventListener("click", (ev) => {
-      if (ev.target.tagName === "A") return;
-      show(items[Number(tr.dataset.i)]);
-    });
-  });
+  }).join("") || "<tr><td colspan='8' class='dim'>nothing matches</td></tr>";
+  if (filtered.length > shown.length) {
+    rows.insertAdjacentHTML("beforeend", "<tr><td colspan='8' class='dim'>showing the first " +
+      shown.length + "; narrow the search, or use the by category view for the whole set." +
+      "</td></tr>");
+  }
+  wireRows(rows);
 }
 
+function renderCategories() {
+  const groups = new Map();
+  for (const i of filtered) {
+    if (!groups.has(i.category)) groups.set(i.category, []);
+    groups.get(i.category).push(i);
+  }
+  const names = [...groups.keys()].sort((a, b) => groups.get(b).length - groups.get(a).length);
+  document.getElementById("catview").innerHTML = names.map((cat) => {
+    const list = groups.get(cat);
+    const links = list.map((i) => {
+      const url = fileUrl(i);
+      const on = selected.has(i.instrument) ? " checked" : "";
+      return "<span class='nm'><input type='checkbox' data-check=\"" + esc(i.instrument) + "\"" +
+        on + "><span class='nmt' data-n=\"" + esc(i.instrument) + "\">" + esc(shortName(i)) +
+        "</span><a href='" + url + "' download title='download this one'>&#8595;</a></span>";
+    }).join("");
+    return "<div class='catgroup'><div class='cathead'>" +
+      "<h3>" + esc(cat) + " <span class='dim'>" + list.length + "</span></h3>" +
+      "<button class='secondary small' data-batch-cat=\"" + esc(cat) + "\">" +
+      "download all " + list.length + " (.zip)</button></div>" +
+      "<div class='namelist'>" + links + "</div></div>";
+  }).join("") || "<div class='dim'>nothing matches</div>";
+
+  const cv = document.getElementById("catview");
+  cv.querySelectorAll("[data-batch-cat]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const list = filtered.filter((i) => i.category === b.dataset.batchCat);
+      batchDownload(list, b.dataset.batchCat);
+    }));
+  cv.querySelectorAll(".nmt").forEach((s) =>
+    s.addEventListener("click", () => {
+      const it = items.find((i) => i.instrument === s.dataset.n);
+      if (it) show(it);
+    }));
+  cv.querySelectorAll("[data-check]").forEach((c) =>
+    c.addEventListener("change", () => {
+      c.checked ? selected.add(c.dataset.check) : selected.delete(c.dataset.check);
+      updateSelectionUi();
+    }));
+}
+
+function wireRows(rows) {
+  rows.querySelectorAll("tr[data-n]").forEach((tr) => {
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.tagName === "A" || ev.target.tagName === "INPUT") return;
+      const it = items.find((i) => i.instrument === tr.dataset.n);
+      if (it) show(it);
+    });
+  });
+  rows.querySelectorAll("[data-check]").forEach((c) =>
+    c.addEventListener("change", () => {
+      c.checked ? selected.add(c.dataset.check) : selected.delete(c.dataset.check);
+      updateSelectionUi();
+    }));
+}
+
+function updateSelectionUi() {
+  const n = [...selected].length;
+  document.getElementById("selCount").textContent =
+    n === 0 ? "nothing selected" : n + " selected";
+  document.getElementById("batch").disabled = n === 0 || busy;
+}
+
+function esc(s) {
+  return String(s === undefined ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ── fetching, drawing, zipping ──────────────────────────────────────────────
+
 async function show(item) {
-  const url = REPO_RAW + encodeURIComponent(item.category) + "/" + encodeURIComponent(item.instrument);
-  document.getElementById("detailPanel").style.display = "block";
-  document.getElementById("detailName").textContent = item.instrument.replace(/\.xrni$/, "");
+  const panel = document.getElementById("detailPanel");
+  panel.style.display = "block";
+  document.getElementById("detailName").textContent = shortName(item);
   document.getElementById("detailInfo").textContent = "fetching…";
   try {
-    const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+    const bytes = await fetchBytes("instruments/" + item.category + "/" + item.instrument);
     const entries = await WT.listZip(bytes);
     const files = new Map(entries.map((e) => [e.name, e.data]));
     const xml = new TextDecoder().decode(files.get("Instrument.xml") || new Uint8Array());
     const frames = [...files.keys()].filter((k) => k.startsWith("SampleData/")).sort();
     const first = frames[0] ? files.get(frames[0]) : null;
-    let cycle = [];
+    let cycle = [], stored = "none";
     if (first) {
-      const wav = WT.parseWav(first);
-      cycle = Array.from(wav.samples);
+      const got = await sampleFloats(first);
+      stored = got.format;
+      cycle = Array.from(got.samples.slice(0, 4096));
     }
     const base = (xml.match(/<BaseNote>(\d+)<\/BaseNote>/) || [])[1] || "?";
     const fin = (xml.match(/<Finetune>(-?\d+)<\/Finetune>/) || [])[1] || "?";
     const loops = (xml.match(/<LoopMode>(\w+)<\/LoopMode>/) || [])[1] || "?";
     const sweep = /<CustomDeviceName>SWEEP</.test(xml);
     document.getElementById("detailInfo").innerHTML =
-      frames.length + " frames · cycle " + cycle.length + " samples · BaseNote " + base +
+      frames.length + " frames · " + stored + " · drawn " + cycle.length + " samples · BaseNote " + base +
       " · Finetune " + fin + "¢ · loop " + loops +
-      (sweep ? " · sweep template present" : "") +
-      "<br><span class='dim'>" + item.collection + " · " + item.source + "</span>";
-    const ratio = window.devicePixelRatio || 1;
-    const canvas = document.getElementById("detail");
-    canvas.width = canvas.clientWidth * ratio; canvas.height = 150 * ratio;
-    const ctx = canvas.getContext("2d");
-    const W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle = "#7dd3a0"; ctx.lineWidth = 1.5 * ratio;
-    ctx.beginPath();
-    for (let i = 0; i < cycle.length; i++) {
-      const x = (i / (cycle.length - 1)) * W;
-      const y = H / 2 - cycle[i] * (H / 2 - 8);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.stroke();
+      (sweep ? " · sweep rig present" : "") +
+      "<br><span class='dim'>" + esc(item.collection) + " · " + esc(item.source) + "</span>";
+    drawCycle(cycle);
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (e) {
     document.getElementById("detailInfo").innerHTML =
-      "<span class='err'>could not read it here: " + e.message + "</span>";
+      "<span class='err'>could not read it here: " + esc(e.message) + " — " +
+      "<a href='" + fileUrl(item) + "' download>download it instead</a></span>";
   }
 }
 
-["q", "cat", "sort"].forEach((id) =>
+function drawCycle(cycle) {
+  const ratio = window.devicePixelRatio || 1;
+  const canvas = document.getElementById("detail");
+  canvas.width = canvas.clientWidth * ratio;
+  canvas.height = 150 * ratio;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = getComputedStyle(document.documentElement)
+    .getPropertyValue("--accent").trim() || "#6b9f40";
+  ctx.lineWidth = 1.5 * ratio;
+  ctx.beginPath();
+  for (let i = 0; i < cycle.length; i++) {
+    const x = (i / (cycle.length - 1 || 1)) * W;
+    const y = H / 2 - cycle[i] * (H / 2 - 8);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+// Renoise keeps sample data as FLAC inside the .xrni (it compresses on save), and the
+// files it never re-saved are plain wav. Browsers decode FLAC themselves, so both work.
+async function sampleFloats(bytes) {
+  if (bytes[0] === 0x52 && bytes[1] === 0x49) {
+    const wav = WT.parseWav(bytes);
+    return { samples: wav.samples, format: "wav" };
+  }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    const buf = await ctx.decodeAudioData(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const samples = new Float32Array(buf.length);
+    if (buf.copyFromChannel) buf.copyFromChannel(samples, 0);
+    else samples.set(buf.getChannelData(0));
+    return { samples, format: "flac" };
+  } finally {
+    ctx.close();
+  }
+}
+
+async function mapLimit(list, limit, fn) {
+  let next = 0, done = 0;
+  const workers = Array.from({ length: Math.min(limit, list.length) }, async () => {
+    while (next < list.length) {
+      const i = next++;
+      await fn(list[i], i);
+      done++;
+    }
+  });
+  await Promise.all(workers);
+  return done;
+}
+
+async function batchDownload(list, label) {
+  if (busy || !list.length) return;
+  if (list.length > 400 &&
+      !confirm("That's " + list.length + " instruments, about " +
+        Math.round(list.length * 30 / 1024) + " MB of zip. Build it here?")) {
+    return;
+  }
+  busy = true;
+  updateSelectionUi();
+  const status = document.getElementById("status");
+  const warnings = document.getElementById("warnings");
+  warnings.textContent = "";
+  const entries = [];
+  const failed = [];
+  let done = 0;
+  try {
+    await mapLimit(list, 6, async (item) => {
+      try {
+        const data = await fetchBytes("instruments/" + item.category + "/" + item.instrument);
+        entries.push({ name: item.category + "/" + item.instrument, data });
+      } catch (e) {
+        failed.push(item.instrument);
+      }
+      done++;
+      if (done % 5 === 0 || done === list.length) {
+        status.textContent = "fetching " + done + " / " + list.length + "…";
+      }
+    });
+    if (!entries.length) throw new Error("nothing could be fetched");
+    status.textContent = "zipping " + entries.length + " instruments…";
+    const zip = WT.zipStore(entries);
+    const blob = new Blob([zip], { type: "application/zip" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (label || "wavetable-instruments").replace(/[^A-Za-z0-9._-]+/g, "-") +
+      "-" + entries.length + ".zip";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    status.textContent = "wrote " + a.download + " (" + (zip.length / 1048576).toFixed(1) + " MB)";
+  } catch (e) {
+    status.textContent = "";
+    warnings.innerHTML = "<span class='err'>batch failed: " + esc(e.message) + "</span>";
+  } finally {
+    busy = false;
+    updateSelectionUi();
+    if (failed.length) {
+      warnings.innerHTML += "<span class='warn'>" + failed.length +
+        " could not be fetched: " + failed.slice(0, 5).map(esc).join(", ") +
+        (failed.length > 5 ? ", …" : "") + "</span>";
+    }
+  }
+}
+
+// ── wiring ─────────────────────────────────────────────────────────────────
+
+["q", "cat", "sort", "view"].forEach((id) =>
   document.getElementById(id).addEventListener("input", render));
+
+document.getElementById("headCheck").addEventListener("change", (ev) => {
+  filtered.forEach((i) => ev.target.checked ? selected.add(i.instrument) : selected.delete(i.instrument));
+  render();
+});
+document.getElementById("selectAll").addEventListener("click", () => {
+  filtered.forEach((i) => selected.add(i.instrument));
+  render();
+});
+document.getElementById("clearSel").addEventListener("click", () => {
+  selected.clear();
+  render();
+});
+document.getElementById("batch").addEventListener("click", () =>
+  batchDownload(filtered.filter((i) => selected.has(i.instrument)), "selected"));
+
 load().catch((e) => {
   document.getElementById("rows").innerHTML =
-    "<tr><td colspan='7' class='err'>could not load the catalogue: " + e.message + "</td></tr>";
+    "<tr><td colspan='8' class='err'>could not load the catalogue: " + esc(e.message) +
+    "</td></tr>";
 });
 </script>
 </body>

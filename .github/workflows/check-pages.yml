@@ -1,0 +1,24 @@
+name: check the pages
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "docs/**"
+      - "tests/**"
+      - ".github/workflows/check-pages.yml"
+
+jobs:
+  browser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install playwright and a browser
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+      - name: Drive the pages
+        run: python tests/browser_check.py

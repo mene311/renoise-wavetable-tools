@@ -13,3 +13,5 @@ wt_build_manifest.json
 !wavetables/*.vitaltable
 !wavetables/*.vital
 !wavetables/*.npy
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>library smoke test</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="favicon.svg">
+<style>body{font:13px ui-monospace,monospace;background:#0e0e10;color:#c8c8d0;padding:16px}
+.ok{color:#6b9f40}.bad{color:#c44}pre{white-space:pre-wrap}</style>
+</head>
+<body>
+<h1 style="font-size:15px">Library smoke test</h1>
+<p id="summary">running…</p>
+<pre id="out"></pre>
+<script src="wt-builder.js"></script>
+<script>
+const WT = WTBuilder;
+// Exercises the paths the library page depends on, against the live repository, so a broken
+// mirror or a CORS regression shows up as a failed line instead of a page that half works.
+const BASES = [
+  "https://raw.githubusercontent.com/mene311/renoise-wavetable-instruments/master/",
+  "https://cdn.jsdelivr.net/gh/mene311/renoise-wavetable-instruments@master/",
+];
+const out = document.getElementById("out");
+let pass = 0, fail = 0;
+
+function log(ok, name, detail) {
+  ok ? pass++ : fail++;
+  out.insertAdjacentHTML("beforeend", "<span class='" + (ok ? "ok" : "bad") + "'>" +
+    (ok ? "PASS" : "FAIL") + "</span> " + name + "  <span style='color:#787880'>" +
+    (detail || "") + "</span>\n");
+}
+
+function encPath(p) { return p.split("/").map(encodeURIComponent).join("/"); }
+
+async function get(path, base) {
+  const r = await fetch(base + encPath(path));
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+async function run() {
+  // 1. the catalogue files the page loads first
+  let provText = "", rows = [];
+  try {
+    provText = new TextDecoder().decode(await get("provenance.tsv", BASES[0]));
+    rows = provText.replace(/\r/g, "").split("\n").filter((l) => l.trim()).slice(1)
+      .map((l) => l.split("\t"));
+    log(rows.length > 2000, "provenance.tsv over raw.githubusercontent",
+      rows.length + " rows");
+  } catch (e) { log(false, "provenance.tsv over raw.githubusercontent", e.message); }
+
+  try {
+    const cat = new TextDecoder().decode(await get("catalogue.tsv", BASES[0]));
+    log(/bright/.test(cat.split("\n")[0]), "catalogue.tsv features", cat.split("\n")[0].slice(0, 60));
+  } catch (e) { log(false, "catalogue.tsv features", e.message); }
+
+  // 2. one instrument, the way a click does it
+  const row = rows.find((r) => r[0] && r[0].endsWith(".xrni")) || [];
+  const path = "instruments/" + row[1] + "/" + row[0];
+  let bytes = null;
+  try {
+    bytes = await get(path, BASES[0]);
+    log(bytes[0] === 0x50 && bytes[1] === 0x4b, "instrument fetch", path + "  " + bytes.length + " bytes");
+  } catch (e) { log(false, "instrument fetch", path + "  " + e.message); }
+
+  // 3. it parses as an instrument
+  if (bytes) {
+    try {
+      const entries = await WT.listZip(bytes);
+      const files = new Map(entries.map((e) => [e.name, e.data]));
+      const frames = [...files.keys()].filter((k) => k.startsWith("SampleData/"));
+      log(files.has("Instrument.xml"), "instrument.xml inside", entries.length + " entries");
+      log(frames.length > 0, "sample frames inside", frames.length + " frames");
+      if (frames.length) {
+        const raw = files.get(frames[0]);
+        const isWav = raw[0] === 0x52 && raw[1] === 0x49;
+        let count = 0;
+        if (isWav) {
+          count = WT.parseWav(raw).samples.length;
+        } else {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const buf = await ctx.decodeAudioData(
+            raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+          count = buf.length;
+          ctx.close();
+        }
+        log(count > 100, "first frame decodes (" + (isWav ? "wav" : "flac") + ")",
+          count + " samples");
+      }
+    } catch (e) { log(false, "instrument parses", e.message); }
+  }
+
+  // 4. the jsDelivr mirror works too, since it's the fallback
+  try {
+    const b = await get(path, BASES[1]);
+    log(b.length === (bytes ? bytes.length : b.length), "same file over jsDelivr",
+      b.length + " bytes");
+  } catch (e) { log(false, "same file over jsDelivr", e.message); }
+
+  // 5. the batch path: zip two files and read them back
+  try {
+    const a = new Uint8Array([1, 2, 3, 4, 5]), b = new Uint8Array(600).fill(7);
+    const zip = WT.zipStore([
+      { name: "one/first.xrni", data: a },
+      { name: "two/second.xrni", data: b },
+    ]);
+    const back = await WT.listZip(zip);
+    const byName = new Map(back.map((e) => [e.name, e.data]));
+    const same = back.length === 2 && byName.get("one/first.xrni").length === 5 &&
+      byName.get("one/first.xrni")[4] === 5 && byName.get("two/second.xrni").length === 600 &&
+      byName.get("two/second.xrni")[599] === 7;
+    log(same, "batch zip round-trip", zip.length + " bytes for 2 files");
+  } catch (e) { log(false, "batch zip round-trip", e.message); }
+
+
+
+  const summary = document.getElementById("summary");
+  summary.innerHTML = "<span class='" + (fail ? "bad" : "ok") + "'>" +
+    pass + " passed, " + fail + " failed</span>";
+  document.title = fail ? "SMOKE FAIL " + fail : "SMOKE OK " + pass;
+}
+
+run().catch((e) => {
+  document.getElementById("summary").textContent = "harness blew up: " + e.message;
+  document.title = "SMOKE FAIL harness";
+});
+</script>
+</body>
+</html>
