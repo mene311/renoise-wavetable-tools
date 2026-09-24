@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RenoiseScriptingTool doc_version="0">
+  <ApiVersion>6.2</ApiVersion>
+  <Id>com.meneses.WavetableBuilder</Id>
+  <Version>3</Version>
+  <Author>Jesús Meneses</Author>
+  <Name>Wavetable Instrument Builder</Name>
+  <Category>Instrument</Category>
+  <Description>Turns a wavetable held in a sample slot into a gate-scan wavetable instrument: one sample slot per frame, a gate LFO per frame, one macro walking the table.</Description>
+  <Homepage>https://github.com/mene311/renoise-wavetable-tools</Homepage>
+</RenoiseScriptingTool>

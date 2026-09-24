@@ -88,6 +88,19 @@ Parameter indices inside an instrument chain, read out of working files:
 | LFO | position / Reset | 8 |
 
 
+## Inside Renoise, as a tool
+
+`renoise-tool/` builds the same instruments from inside Renoise, and
+`com.meneses.WavetableBuilder.xrnx` in the repo root is the packaged tool. Load a wavetable as a
+sample, select it, run Tools → Wavetable Instrument Builder, pick the frame count and save. It
+writes the `.xrni` and loads it straight away.
+
+It writes a file rather than building the instrument through the API because
+`renoise.InstrumentMacro.mappings` is read-only, and instrument chains cannot be automated by
+anything except a macro, so the mapping that walks the table has to exist in the file.
+`renoise-tool/README.md` covers the edge cases and what each one does.
+
+
 ## No Python? Build them on GitHub
 
 The builder runs in GitHub Actions, so nothing has to be installed locally:
