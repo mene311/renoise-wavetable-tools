@@ -114,6 +114,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scan", action="store_true")
     ap.add_argument("--build", action="store_true")
+    ap.add_argument("--with-sweep", action="store_true",
+                    help="build every instrument with the in-instrument sweep template")
+    ap.add_argument("--with-fx", action="store_true",
+                    help="also drop a gainer and filter into the SUM chain")
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--probe", type=int, default=6)
     ap.add_argument("--limit", type=int, default=0)
@@ -182,13 +186,18 @@ def main():
         listing = os.path.join(a.outdir, "sources.txt")
         with open(listing, "w") as f:
             for (tag, path, _), lab in zip(rows, labels):
-                nm = uniq[lab] + " / " + os.path.splitext(os.path.basename(path))[0]
+                nm = os.path.splitext(os.path.basename(path))[0] + " WT"  # match the library
                 nm = nm.replace("/", "-").replace("\t", " ")
                 f.write(f"{path}\t{nm}\n")
         print(f"\nbuilding {len(rows)} instruments in batch...")
+        extra = []
+        if a.with_sweep:
+            extra.append("--with-sweep")
+        if a.with_fx:
+            extra.append("--with-fx")
         subprocess.run([sys.executable, os.path.join(HERE, "wt_xrni.py"),
-                        "--sources-from", listing, "--dedupe", "--fast", "--install",
-                        "-o", a.outdir], check=False)
+                        "--sources-from", listing, "--dedupe", "--install",
+                        "-o", a.outdir] + extra, check=False)
         # sort the installed instruments into their timbre folders
         man = os.path.join(a.outdir, "wt_build_manifest.json")
         by_src = {r[1]: uniq[l] for r, l in zip(rows, labels)}
