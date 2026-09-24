@@ -83,25 +83,31 @@ FEATS = ["bright", "odd", "slope", "flat", "h1", "crest", "zcr"]
 
 
 def name_cluster(c):
-    """Turn a cluster centroid into something a musician would recognise."""
+    """Turn a cluster centroid into something a musician would recognise.
+    Features: bright (centroid in harmonics), odd (odd-harmonic share), sl (harmonic
+    slope), fl (spectral flatness), h1 (fundamental share), cr (crest)."""
     b, odd, sl, fl, h1, cr, zc = c
-    if b > 60 or fl > 0.45:
-        return "noise and texture"
-    if b > 25:
-        return "harsh and metallic"
-    if fl > 0.25 and b > 12:
-        return "gritty and distorted"
-    if h1 > 0.55 and b < 3:
-        return "sine and sub"
-    if odd > 0.85 and sl < -1.4 and b < 6:
-        return "triangle and soft"
-    if odd > 0.8 and sl > -1.4 and b < 12:
-        return "square and pulse"
-    if odd < 0.6 and sl > -1.6:
-        return "saw and bright"
-    if b < 12:
-        return "additive and organ"
-    return "digital and formant"
+    if cr > 8 or (fl > 0.7 and b > 200):
+        return "impulses and clicks"
+    if fl > 0.45 and b > 200:
+        return "white noise"
+    if b > 60 or (fl > 0.45 and b > 30):
+        return "texture and noise"
+    if b > 12 and fl > 0.15:
+        return "bright and gritty"
+    if b > 12:
+        return "metallic and FM"
+    if sl < -5:
+        return "near sine"
+    if odd < 0.3 and h1 < 0.1:
+        return "octave and folded"
+    if h1 > 0.6 and odd > 0.8:
+        return "sine and soft triangle"
+    if odd > 0.65 and fl > 0.2:
+        return "pulse and round"
+    if odd > 0.65:
+        return "odd harmonics, hollow"
+    return "additive and organ"
 
 
 def main():
