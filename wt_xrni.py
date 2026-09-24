@@ -411,22 +411,28 @@ SWEEP_LFO_TPL = """          <LfoDevice type="LfoDevice">
 
 
 def sweep_rig(rate=8.0):
-    """The rig that lives in the SUM chain, matching a layout wired by hand in Renoise:
+    """Place the sweep infrastructure in the SUM chain and wire nothing up:
 
-        0 MIXER (already there)  1 SWEEP  2 HYDRA -> MACROS  3 INSTR MACRO  4 LP FILTER  5 GAIN
+        0 MIXER (already there)  1 SWEEP  2 HYDRA  3 INSTR MACRO
 
-    One shaped LFO drives the Hydra's input (device 2, parameter 1), the Hydra's eight
-    outputs land on macros 1-8 of the Instrument Macros device (device 3, parameters 1-8).
-    Macro 1 is already mapped to the frame gates, so it walks the table; macros 2-8 are free
-    to map onto the filter (cutoff = param 2) and gain (volume = param 1) in this same chain.
+    A shaped LFO, a Hydra and the Instrument Macros device. Every destination is left
+    unassigned on purpose, so whoever loads the instrument points the LFO at the Hydra, the
+    Hydra at whatever they want, and maps macros 2-8 to their own taste. Macro 1 already
+    walks the table.
 
-    Every index here was read out of a working instrument.
+    Verified parameter indices inside an instrument chain, for wiring it up:
+
+        Hydra   input            param 1
+        Macro   macro 1-8        params 1-8
+        Filter  cutoff           param 2
+        Gainer  volume           param 1
+        LFO     position/Reset   param 8
     """
     lfo_idx, hydra_idx, macro_idx = 1, 2, 3
-    # device indices arrive as arguments: 3 SWEEP, 4 HYDRA, 5 INSTR MACRO
+    UNASSIGNED = -1
     shape = [abs(1 - 2 * (i / 15.0)) for i in range(16)]
     pts = "\n".join(f"                <Point>{i},{v:.4f},0.0</Point>" for i, v in enumerate(shape))
-    lfo = SWEEP_LFO_TPL.format(dest_effect=hydra_idx, dest_param="1.0", rate=rate,
+    lfo = SWEEP_LFO_TPL.format(dest_effect=UNASSIGNED, dest_param=UNASSIGNED, rate=rate,
                                length=16, points=pts)
 
     hydra = '          <HydraDevice type="HydraDevice">\n'
@@ -451,7 +457,7 @@ def sweep_rig(rate=8.0):
             </InputValue>
 """
     for i in range(1, 10):
-        eff, par = (macro_idx, i) if i <= 8 else (-1, -1)
+        eff, par = (-1, -1)              # left for the user to wire
         hydra += f"""            <Out{i}DestTrack>
               <Value>-1</Value>
               <Visualization>Device only</Visualization>
@@ -828,7 +834,7 @@ def lowpass_frames(frames, f0, hz, taper=0.5):
 
 def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
           gate_offset=0.0, base_volume=0.0, base_note=None, finetune=None,
-          source="", jobs=None, with_sweep=False, sweep_rate=8.0):
+          source="", jobs=None, with_sweep=False, sweep_rate=8.0, with_fx=False):
     import numpy as np
     n = len(frames)
     if n < 2:
@@ -876,9 +882,10 @@ def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
                        + SEND_TPL.format(dest=sum_idx)))
     sum_devs = MIXER_TPL.format(name="Mixer", volume="1.0")
     if with_sweep:
-        # SUM chain order matches the hand-wired reference: mixer, sweep, hydra, macros,
-        # then the filter and gain it drives
-        sum_devs += sweep_rig(rate=sweep_rate) + FILTER_TPL + GAINER_TPL
+        # infrastructure only: shaped LFO, Hydra, Instrument Macros, nothing wired
+        sum_devs += sweep_rig(rate=sweep_rate)
+    if with_fx:
+        sum_devs += FILTER_TPL + GAINER_TPL
     chains.append(("SUM", sum_devs))
 
     dc_xml = "    <DeviceChains>\n"
@@ -1074,8 +1081,11 @@ def main():
     ap.add_argument("--jobs", type=int, default=0,
                     help="parallel frame encoders (0 = auto: min(8, cpus), 1 = serial)")
     ap.add_argument("--with-sweep", action="store_true",
-                    help="build the sweep rig into the instrument: shaped LFO -> Hydra -> "
-                         "the instrument macros, so macro 1 walks the table")
+                    help="place the sweep infrastructure in the SUM chain: shaped LFO, Hydra "
+                         "and the Instrument Macros device, with every destination left "
+                         "unassigned for the user to wire up")
+    ap.add_argument("--with-fx", action="store_true",
+                    help="also drop a Gainer and an Analog Filter into the SUM chain")
     ap.add_argument("--sweep-rate", type=float, default=8.0, help="sweep LFO rate, lines per cycle")
     ap.add_argument("--mixed-lengths", action="store_true",
                     help="allow frame files of different lengths (e.g. one pitch per frame)")
