@@ -1,68 +1,81 @@
 # renoise-wavetable-tools
 
-Build gate-scan wavetable `.xrni` instruments for Renoise, then check them.
+Build wavetable instruments for Renoise. Load one, hold a note, turn a single knob, and
+the sound slides from one wave shape to the next, the way a wavetable oscillator does in
+Serum, Vital or Massive. It plays on the sampler you already have, so there's no plugin and no CPU spike.
 
-N frames sit in N sample slots and all sound at once. Each frame has an LFO gate
-reading a custom triangle envelope, so one macro ("WT Position") opens one frame at a
-time and hands over to the next. Neighbouring triangles sum to 1.0, so you won't hear a
-level dip while sweeping.
+## What it does
 
-    macro WT Position -> chain 0 (one frozen LFO per frame) -> frame chains 1..N -> SUM
+A wavetable is a pile of single-cycle waves: one cycle of a sine, then something more
+triangle-ish, then a saw, then a square, and so on, sometimes a few hundred of them. A
+wavetable synth reads one at a time and morphs between them as you move the position.
 
-## Requirements
+Renoise has no wavetable oscillator. It has sample slots, and those stack.
 
-Python3 with numpy, ffmpeg, xmllint (optional), Renoise 3.5.x.
+Put every frame in its own slot, let them all play, then close them one by one as you
+turn a knob. That's all these instruments are. Each frame gets its own gate, which is a
+slow LFO with a triangle drawn on it. Turning the WT Position macro opens the current frame while
+closing the previous one, and the triangles are sized so neighbours always add up to 1.0,
+so the level stays put between frames. You get a morph that walks the whole table instead
+of a crossfade between two waves.
+
+Feed it a classic shapes table and you get sine to square. Feed it a growl table and you
+get growl sweeps. FM tables, chip wavetables, whatever waves you have lying around.
 
 ## Use
 
+Build an instrument from whatever source you have:
+
 ```bash
-# a folder of single-cycle frames, any length or rate
+# a folder of single-cycle waves
 python3 wt_xrni.py --frames ./frames --name "My WT"
 
-# a Vital table or preset (tables are embedded in both)
-python3 wt_xrni.py --source "Basic Shapes.vitaltable" --n-frames 12 --name "Shapes WT" --install
+# a Vital wavetable or preset
+python3 wt_xrni.py --source "Basic Shapes.vitaltable" --name "Shapes WT" --install
 
-# a Serum-format .wav wavetable
-python3 wt_xrni.py --source "Growl.wav" --n-frames 12 --select spectral --name "Growl WT" --install
-
-# audit a build
-python3 wt_verify.py "Growl WT.xrni" --source "Growl.wav"
+# a wavetable .wav from a Serum-style pack
+python3 wt_xrni.py --source "Growl.wav" --n-frames 12 --name "Growl WT" --install
 ```
 
-Demo with nothing to download: `python3 examples/make_sine_to_square.py /tmp/out`
+`--install` puts it in Renoise's User Library, under Instruments/Wavetables. In Renoise,
+load it on a track, hold a note, and turn macro 1, WT Position, in the instrument panel.
+Automate that macro and the sweep moves on its own.
 
-Load the `.xrni`, hold a note, sweep WT Position. `--install` copies to
-`~/.local/share/Renoise/User Library/Instruments/Wavetables/`.
+Nothing to hand? `python3 examples/make_sine_to_square.py /tmp/out` builds a sine to
+square instrument from scratch, to hear what the format does.
 
-## Flags worth knowing
+## Knobs that change the sound
 
-| flag | default | effect |
+| flag | default | what it does |
 |---|---|---|
-| `--n-frames` | 12 | 12 is the ceiling; Renoise allows 12 voices per note column |
-| `--select` | even | `spectral` keeps the frames that differ most |
-| `--cycle-len` | 169 | samples per cycle, which sets the loop pitch and the harmonic ceiling: 169 gives 260 Hz with 84 harmonics, 1070 gives 41 Hz with 535 |
-| `--gate-amp` `--gate-offset` `--base-volume` | 1, 0, 0 | full-depth gate; 0.25, -0.375, 1 reproduces the stock templates' shallow morph |
+| `--n-frames` | 12 | how many frames go in. Twelve is the ceiling in Renoise, so a long table gets sampled down to twelve positions |
+| `--cycle-len` | 169 | how many samples make one cycle. Shorter sits higher and brighter, longer sits lower and fuller |
+| `--select spectral` | off | picks the frames that differ most from each other, which makes a more obvious sweep than taking every Nth frame |
+| `--gate-amp`, `--gate-offset`, `--base-volume` | 1, 0, 0 | gate depth. One opens a frame fully and closes the last one, lower values blend frames instead of soloing them |
 
+## Sources it reads
 
-Sources: frame folders, Vital `.vitaltable` (both `wave_data` and `audio_file` storage
-forms), `.vital` presets, Serum-format `.wav`, `.npy`. `vitaltable_to_wav.py` converts
-the other way.
+Folders of single-cycle waves, Vital `.vitaltable` files and `.vital` presets (the waves
+are in there, base64 encoded), Serum-format `.wav` wavetables, and `.npy` arrays.
+Need the opposite? `vitaltable_to_wav.py` writes a Serum-format `.wav` from a
+Vital table.
 
-## What wt_verify checks
+## Checking your build
 
-Structure, gate sums, provenance against the source, harmonic series against analytic
-sine/triangle/saw/square, tuning in cents, and `-frames`, `-sweep`, `-nulltest` renders
-for A/B in Renoise.
+`wt_verify.py` reads an instrument back and tells you if it's honest: the frames are the
+ones from your source, one frame sounds at a time, the gates add up to 1.0 so sweeps don't
+dip, and the tuning sits within a cent. It also renders reference audio, a sweep, the
+frames one by one, a single frame held, to compare against what Renoise plays.
 
 ## Limits
 
-Transposing above the root note aliases. Oversample and Cubic don't remove that
-entirely. SampleData binds positionally, so the zip order matters, and the builder
-handles it.
+Renoise allows twelve voices per note column, so twelve frames per instrument. Play far
+above the note the frames were cut for and the top end gets gritty, which is how samplers behave.
 
 ## Credits
 
-Mechanism reverse-engineered from instruments shared in the Renoise Discord (Kaidiak)
-and from Renoise's `Utility/{2,4,6,12} frame Wavetable Init.xrni`. No sample content here.
+The gating trick came from instruments Kaidiak shared in the Renoise Discord. Renoise
+ships a plainer version of the same idea as `Utility/2, 4, 6 and 12 frame Wavetable Init`.
+No sample content lives in this repo.
 
 MIT.
