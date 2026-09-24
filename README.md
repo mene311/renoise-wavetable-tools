@@ -65,10 +65,10 @@ Need the opposite? `vitaltable_to_wav.py` writes a Serum-format `.wav` from a Vi
 
 ## One caveat
 
-Pitch is only ever as good as the single cycle. A table whose energy sits on a harmonic
-other than the first reads an octave or a twelfth away from the note you play, and playing
-far from the base note shifts the top end. That is what a sampler does with one-cycle
-content, not something the build fixes.
+Some instruments play at a different pitch than the key you press. When the loudest part of
+the wave isn't the fundamental, the note comes out an octave or a twelfth away, and high
+top octaves get rough, since harmonics that no longer fit under Nyquist fold back down.
+Looping one cycle in a sampler does that.
 
 ## Credits
 
