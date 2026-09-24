@@ -68,7 +68,7 @@ Need the opposite? `vitaltable_to_wav.py` writes a Serum-format `.wav` from a Vi
 Pitch is only ever as good as the single cycle. A table whose energy sits on a harmonic
 other than the first reads an octave or a twelfth away from the note you play, and playing
 far from the base note shifts the top end. That is what a sampler does with one-cycle
-content, not something the build can fix.
+content, not something the build fixes.
 
 ## Credits
 
