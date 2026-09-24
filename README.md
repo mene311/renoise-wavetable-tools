@@ -71,7 +71,7 @@ Looping one cycle in a sampler does that.
 
 ## Credits
 
-The gating trick came from instruments Kaidiak shared in the Renoise Discord. Renoise
+The gating trick came from instruments Kaidiak shared in the Trackercorps Discord. Renoise
 ships a plainer version of the same idea as `Utility/2, 4, 6 and 12 frame Wavetable Init`,
 by slujr (zensphere). Thanks to both. No sample content lives in this repo.
 
