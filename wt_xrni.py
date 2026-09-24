@@ -292,6 +292,165 @@ def encode_flac(frames_i16, sr, dst):
     return len(frames_i16)
 
 
+
+SWEEP_LFO_TPL = """          <LfoDevice type="LfoDevice">
+            <SelectedPresetName>Init</SelectedPresetName>
+            <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
+            <SelectedPresetIsModified>true</SelectedPresetIsModified>
+            <CustomDeviceName>SWEEP</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </IsActive>
+            <DestTrack>
+              <Value>-1</Value>
+              <Visualization>Device only</Visualization>
+            </DestTrack>
+            <DestEffect>
+              <Value>{dest_effect}</Value>
+              <Visualization>Device only</Visualization>
+            </DestEffect>
+            <DestParameter>
+              <Value>{dest_param}</Value>
+              <Visualization>Device only</Visualization>
+            </DestParameter>
+            <Amplitude>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </Amplitude>
+            <Offset>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </Offset>
+            <Frequency>
+              <Value>{rate}</Value>
+              <Visualization>Device only</Visualization>
+            </Frequency>
+            <Type>
+              <Value>4</Value>
+              <Visualization>Device only</Visualization>
+            </Type>
+            <CustomEnvelope>
+              <PlayMode>Lines</PlayMode>
+              <Length>{length}</Length>
+              <ValueQuantum>0.0</ValueQuantum>
+              <Polarity>Unipolar</Polarity>
+              <Points>
+{points}
+              </Points>
+            </CustomEnvelope>
+            <CustomEnvelopeOneShot>false</CustomEnvelopeOneShot>
+            <UseAdjustedEnvelopeLength>true</UseAdjustedEnvelopeLength>
+          </LfoDevice>
+"""
+
+
+def sweep_rig(gate_lfo_count, rate=8.0, macro_name="WT Position"):
+    """The in-instrument sweep: one shaped LFO -> Hydra -> the instrument's macros.
+
+    Device index 0 of the GATES chain is its SampleMixer, 1..N are the gate LFOs, so the
+    rig lands after them: N+1 SWEEP, N+2 HYDRA, N+3 INSTR MACRO. Macro 1 is already mapped
+    to the gate positions, so the Hydra sweeping macro 1 walks the table and macros 2-8 are
+    left for the user to map.
+    """
+    rig_base = gate_lfo_count + 1                    # device index of SWEEP
+    hydra_idx = rig_base + 1
+    macro_idx = rig_base + 2
+    shape = [abs(1 - 2 * (i / 15.0)) for i in range(16)]
+    pts = "\n".join(f"                <Point>{i},{v:.4f},0.0</Point>" for i, v in enumerate(shape))
+    lfo = SWEEP_LFO_TPL.format(dest_effect=hydra_idx, dest_param=3, rate=rate,
+                               length=16, points=pts)
+
+    hydra = '          <HydraDevice type="HydraDevice">\n'
+    hydra += MIXER_TPL.split("</SampleMixerDevice>")[0].replace(
+        "SampleMixerDevice", "HydraDevice").replace("Mixer</CustomDeviceName>",
+                                                    "HYDRA -> MACROS</CustomDeviceName>") if False else ""
+    hydra = '          <HydraDevice type="HydraDevice">\n'
+    hydra += """            <SelectedPresetName>Init</SelectedPresetName>
+            <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
+            <SelectedPresetIsModified>true</SelectedPresetIsModified>
+            <CustomDeviceName>HYDRA -&gt; MACROS</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </IsActive>
+            <VisiblePages>1</VisiblePages>
+            <InputValue>
+              <Value>0.0</Value>
+              <Visualization>Mixer and Device</Visualization>
+            </InputValue>
+"""
+    for i in range(1, 10):
+        eff = macro_idx if i <= gate_lfo_count - gate_lfo_count + 8 else -1
+        par = i if i <= 8 else -1
+        hydra += f"""            <Out{i}DestTrack>
+              <Value>-1</Value>
+              <Visualization>Device only</Visualization>
+            </Out{i}DestTrack>
+            <Out{i}DestEffect>
+              <Value>{eff if i <= 8 else -1}</Value>
+              <Visualization>Device only</Visualization>
+            </Out{i}DestEffect>
+            <Out{i}DestParameter>
+              <Value>{par}</Value>
+              <Visualization>Device only</Visualization>
+            </Out{i}DestParameter>
+            <Out{i}Min>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </Out{i}Min>
+            <Out{i}Max>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </Out{i}Max>
+            <Out{i}Scaling>Linear</Out{i}Scaling>
+"""
+    hydra += "          </HydraDevice>\n"
+
+    macros = '          <InstrumentMacroDevice type="InstrumentMacroDevice">\n'
+    macros += """            <SelectedPresetName>Init</SelectedPresetName>
+            <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
+            <SelectedPresetIsModified>true</SelectedPresetIsModified>
+            <CustomDeviceName>INSTR MACRO</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </IsActive>
+"""
+    for i in range(8):
+        macros += f"""            <ParameterValue{i}>
+              <Value>0.5</Value>
+              <Visualization>Device only</Visualization>
+            </ParameterValue{i}>
+"""
+    macros += """            <PitchbendValue>
+              <Value>0.5</Value>
+              <Visualization>Device only</Visualization>
+            </PitchbendValue>
+            <ModulationValue>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </ModulationValue>
+            <ChannelPressureValue>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </ChannelPressureValue>
+            <PhraseProgrammValue>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </PhraseProgrammValue>
+            <LinkedInstrument>-1</LinkedInstrument>
+          </InstrumentMacroDevice>
+"""
+    return lfo + hydra + macros
+
+
 # ------------------------------------------------------------- frame sources
 def _decode_vital_component(c, frame_size=None):
     """Returns (frames 2d array, sample_rate) for a Vital component, or (None, reason).
@@ -604,7 +763,7 @@ def lowpass_frames(frames, f0, hz, taper=0.5):
 
 def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
           gate_offset=0.0, base_volume=0.0, base_note=None, finetune=None,
-          source="", jobs=None):
+          source="", jobs=None, with_sweep=False, sweep_rate=8.0):
     import numpy as np
     n = len(frames)
     if n < 2:
@@ -641,6 +800,8 @@ def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
         gate_devs.append(LFO_TPL.format(label=f"gate {i+1:02d}", dest_track=i + 1,
                                         amp=f"{gate_amp:g}", offset=f"{gate_offset:g}",
                                         length=L, points="\n".join(pts)))
+    if with_sweep:
+        gate_devs.append(sweep_rig(n, rate=sweep_rate))
     chains.append((f"GATES", "\n".join(gate_devs)))
     for i in range(n):
         chains.append((f"FRAME {i+1:02d}",
@@ -777,7 +938,8 @@ def build_source(a):
     out = os.path.join(a.outdir, re.sub(r"[^\w. (),-]+", "_", a.name) + ".xrni")
     build(frames, a.name, sr, cycle, out, spacing=a.spacing, gate_amp=a.gate_amp,
           gate_offset=a.gate_offset, base_volume=a.base_volume, base_note=a.base_note,
-          finetune=a.finetune, source=src, jobs=a.jobs)
+          finetune=a.finetune, source=src, jobs=a.jobs,
+          with_sweep=a.with_sweep, sweep_rate=a.sweep_rate)
     validate(out, fast=a.fast)
     write_manifest(out, name=a.name, source=src, n_frames=len(frames), cycle_len=cycle,
                    sr=sr, select=a.select, spacing=a.spacing, gate_amp=a.gate_amp,
@@ -839,6 +1001,10 @@ def main():
     ap.add_argument("--frame-size", type=int, help="frame size for .wav wavetables (default: auto)")
     ap.add_argument("--jobs", type=int, default=0,
                     help="parallel frame encoders (0 = auto: min(8, cpus), 1 = serial)")
+    ap.add_argument("--with-sweep", action="store_true",
+                    help="build the sweep rig into the instrument: shaped LFO -> Hydra -> "
+                         "the instrument macros, so macro 1 walks the table")
+    ap.add_argument("--sweep-rate", type=float, default=8.0, help="sweep LFO rate, lines per cycle")
     ap.add_argument("--mixed-lengths", action="store_true",
                     help="allow frame files of different lengths (e.g. one pitch per frame)")
     ap.add_argument("--select", choices=["even", "spectral"], default="even",

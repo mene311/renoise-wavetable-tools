@@ -246,8 +246,10 @@ def main():
           f"{len(inst['maps'])} mappings, param(s) {sorted(set(m['param'] for m in inst['maps']))}")
 
     print("\n2. gates")
+    def is_gate(d):
+        return d.get("name", "").startswith("gate") or not d.get("name")
     gates = [d for c in inst["chains"] if c["name"] == "GATES"
-             for d in c["devices"] if d["type"] == "LfoDevice"]
+             for d in c["devices"] if d["type"] == "LfoDevice" and is_gate(d)]
     if not gates:   # also accept a layout where each frame chain holds its own gate
         gates = [d for c in frame_chains for d in c["devices"] if d["type"] == "LfoDevice"]
     if not gates:   # ... or gates kept in a chain of their own, one per frame chain
