@@ -1,5 +1,9 @@
 # Handoff — wavetable instruments for Renoise
 
+> Everything published for Renoise, including this project, is indexed at
+> <https://mene311.github.io/renoise-hub/> (repo `~/Projects/renoise-hub`).
+
+
 **Status: PAUSED, nothing running.** Last session built the tooling, the library, the Renoise tool
 and the web builder, and the instruments repo was refreshed (commit `b08b792`). Small leftovers are
 listed under Remaining.
