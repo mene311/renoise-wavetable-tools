@@ -23,10 +23,7 @@ python3 wt_xrni.py --frames ./frames --name "My WT"
 python3 wt_xrni.py --source "Basic Shapes.vitaltable" --n-frames 12 --name "Shapes WT" --install
 
 # a Serum-format .wav wavetable
-python3 wt_xrni.py --source "Growl.wav" --n-frames 12 --select spectral --root auto --name "Growl WT" --install
-
-# what root would be picked?
-python3 wt_xrni.py --source SOURCE --report
+python3 wt_xrni.py --source "Growl.wav" --n-frames 12 --select spectral --name "Growl WT" --install
 
 # audit a build
 python3 wt_verify.py "Growl WT.xrni" --source "Growl.wav"
@@ -43,14 +40,9 @@ Load the `.xrni`, hold a note, sweep WT Position. `--install` copies to
 |---|---|---|
 | `--n-frames` | 12 | 12 is the ceiling; Renoise allows 12 voices per note column |
 | `--select` | even | `spectral` keeps the frames that differ most |
-| `--cycle-len` | 169 | sets root note and harmonic ceiling: 169 gives C-4 with 84 harmonics, 1070 gives 41 Hz with 535 |
-| `--root auto` | off | picks the cycle length from measured brightness |
-| `--target-centroid` | 600 | centroid target for `--root auto` |
+| `--cycle-len` | 169 | samples per cycle, which sets the loop pitch and the harmonic ceiling: 169 gives 260 Hz with 84 harmonics, 1070 gives 41 Hz with 535 |
 | `--gate-amp` `--gate-offset` `--base-volume` | 1, 0, 0 | full-depth gate; 0.25, -0.375, 1 reproduces the stock templates' shallow morph |
 
-Bright material rooted at C-4 sounds shrill, so it's worth checking first. `--report`
-prints brightness (centroid divided by fundamental): 1 to 3 is a classic shape, 5 to 20 is growl or bass, over 30 is
-noise.
 
 Sources: frame folders, Vital `.vitaltable` (both `wave_data` and `audio_file` storage
 forms), `.vital` presets, Serum-format `.wav`, `.npy`. `vitaltable_to_wav.py` converts
