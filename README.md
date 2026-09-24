@@ -5,6 +5,9 @@ sound morphs through the table the way a wavetable oscillator does in Serum or V
 It runs on the sampler, so there's no plugin and no CPU spike.
 
 
+Everything here sits alongside the rest of my Renoise work, listed at
+<https://mene311.github.io/renoise-hub/>.
+
 ## LFO shapes and modulation sets
 
 The Vital LFO shapes rebuilt as Renoise presets live in [`presets/`](presets): 133 LFO device
