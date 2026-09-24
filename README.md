@@ -63,11 +63,6 @@ Folders of single-cycle waves, Vital `.vitaltable` files and `.vital` presets (t
 are in there, base64 encoded), Serum-format `.wav` wavetables, and `.npy` arrays.
 Need the opposite? `vitaltable_to_wav.py` writes a Serum-format `.wav` from a Vital table.
 
-## Limits
-
-Play far above the note the frames were cut for and the top end grits up. That's the
-sampler talking, not the design. Twelve frames is the hard cap.
-
 ## Credits
 
 The gating trick came from instruments Kaidiak shared in the Renoise Discord. Renoise
