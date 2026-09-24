@@ -4,21 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Instrument library</title>
+<meta name="description" content="Browse the published gate-scan wavetable instruments by timbre.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>Wavetable instrument library</h1>
-  <span class="sub">sorted by timbre, built from CC0 and free wavetables</span>
-  <nav><a href="index.html">Builder</a><a href="library.html">Instrument library</a>
-       <a href="https://github.com/mene311/renoise-wavetable-instruments">Repo</a></nav>
-</header>
-
+<div class="site-header"><div class="header-inner">
+<a class="logo" href="index.html"><span class="logo-text">wavetable<strong>&#8594;</strong>xrni</span></a>
+<nav class="site-nav"><a href="index.html">Builder</a><a href="library.html" class="active">Library</a><a href="https://github.com/mene311/renoise-wavetable-tools">Source</a></nav>
+</div></div>
+<div class="hero"><div class="hero-inner">
+<h1>Wavetable instrument library</h1>
+<p>Instruments filed by timbre, built from CC0 and free wavetables. Click a row and it'll be fetched and drawn.</p>
+</div></div>
 <main>
-  <div class="panel">
-    <h2>Browse</h2>
+
+<div class="panel">
+  <div class="panel-head"><h2>Browse</h2><span class="hint" id="count"></span></div>
+  <div class="panel-body">
     <div class="opts">
-      <label>Search <input type="text" id="q" placeholder="name or source table" size="26"></label>
+      <label>Search <input type="text" id="q" placeholder="name or source table" size="24"></label>
       <label>Category <select id="cat"><option value="">all</option></select></label>
       <label>Sort
         <select id="sort">
@@ -27,28 +31,36 @@
           <option value="category">category</option>
         </select>
       </label>
-      <span id="count" class="dim"></span>
     </div>
-    <div class="note">
-      Click a row to fetch it and draw the waveform of its first frame. Each instrument is a
-      gate-scan wavetable: macro 1 (<b>WT Position</b>) walks the table.
-    </div>
+    <div class="note">Macro 1 (<strong>WT Position</strong>) walks the table in every one of these.
+    The <span class="tag">get</span> link downloads the instrument straight from the repository.</div>
   </div>
+</div>
 
-  <div class="panel" id="detailPanel" style="display:none">
-    <h2 id="detailName">—</h2>
+<div class="panel" id="detailPanel" style="display:none">
+  <div class="panel-head"><h2 id="detailName">—</h2><span class="hint">first frame, drawn from the instrument</span></div>
+  <div class="panel-body">
     <canvas id="detail" height="150"></canvas>
     <div class="note" id="detailInfo"></div>
   </div>
+</div>
 
-  <div class="panel">
-    <table>
-      <thead><tr><th>Instrument</th><th>Category</th><th>Source</th><th>Brightness</th><th>Odd</th><th>Slope</th><th></th></tr></thead>
+<div class="panel">
+  <div class="panel-head"><h2>Instruments</h2></div>
+  <div class="panel-body">
+    <table class="rows">
+      <thead><tr><th>Instrument</th><th>Category</th><th>Source</th>
+        <th class="num">Bright</th><th class="num">Odd</th><th class="num">Slope</th><th></th></tr></thead>
       <tbody id="rows"><tr><td colspan="7" class="dim">loading…</td></tr></tbody>
     </table>
   </div>
+</div>
 </main>
-
+<footer>
+  <span>gate-scan wavetables for Renoise</span>
+  <a href="index.html">builder</a>
+  <a href="https://github.com/mene311/renoise-wavetable-instruments">repository</a>
+</footer>
 <script src="wt-builder.js"></script>
 <script>
 const RAW = "https://raw.githubusercontent.com/mene311/renoise-wavetable-instruments/master/";
@@ -104,13 +116,13 @@ function render() {
   const rows = document.getElementById("rows");
   rows.innerHTML = list.slice(0, 600).map((i, n) => {
     const url = REPO_RAW + encodeURIComponent(i.category) + "/" + encodeURIComponent(i.instrument);
-    return "<tr data-i='" + items.indexOf(i) + "'>" +
+    return "<tr class='clickable' data-i='" + items.indexOf(i) + "'>" +
       "<td>" + i.instrument.replace(/\.xrni$/, "") + "</td>" +
       "<td><span class='tag'>" + i.category + "</span></td>" +
       "<td class='dim mono'>" + i.source + "</td>" +
-      "<td class='mono'>" + (isNaN(i.bright) ? "—" : i.bright.toFixed(1)) + "</td>" +
-      "<td class='mono'>" + (isNaN(i.odd) ? "—" : i.odd.toFixed(2)) + "</td>" +
-      "<td class='mono'>" + (isNaN(i.slope) ? "—" : i.slope.toFixed(2)) + "</td>" +
+      "<td class='num'>" + (isNaN(i.bright) ? "—" : i.bright.toFixed(1)) + "</td>" +
+      "<td class='num'>" + (isNaN(i.odd) ? "—" : i.odd.toFixed(2)) + "</td>" +
+      "<td class='num'>" + (isNaN(i.slope) ? "—" : i.slope.toFixed(2)) + "</td>" +
       "<td><a href='" + url + "' download>get</a></td></tr>";
   }).join("") || "<tr><td colspan='7' class='dim'>nothing matches</td></tr>";
   rows.querySelectorAll("tr[data-i]").forEach((tr) => {

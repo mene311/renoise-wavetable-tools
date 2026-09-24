@@ -3,35 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wavetable → Renoise instrument</title>
+<title>Wavetable to Renoise instrument</title>
+<meta name="description" content="Build native Renoise wavetable instruments in the browser, no upload.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>Wavetable → Renoise instrument</h1>
-  <span class="sub">drop wavetables, get .xrni files. Nothing is uploaded.</span>
-  <nav><a href="index.html">Builder</a><a href="library.html">Instrument library</a>
-       <a href="https://github.com/mene311/renoise-wavetable-tools">Source</a></nav>
-</header>
-
+<div class="site-header"><div class="header-inner">
+<a class="logo" href="index.html"><span class="logo-text">wavetable<strong>&#8594;</strong>xrni</span></a>
+<nav class="site-nav"><a href="index.html" class="active">Builder</a><a href="library.html">Library</a><a href="https://github.com/mene311/renoise-wavetable-tools">Source</a></nav>
+</div></div>
+<div class="hero"><div class="hero-inner">
+<h1>Wavetables into Renoise instruments</h1>
+<p>Drop wavetables, get <code>.xrni</code> files that play on Renoise's own sampler: one sample slot per frame, a gate LFO per frame, one macro walking the table. Everything happens in this page.</p>
+</div></div>
 <main>
-  <div class="panel">
-    <h2>1. Drop your wavetables</h2>
+
+<div class="panel">
+  <div class="panel-head"><h2>1 · Source</h2><span class="hint">one wavetable becomes one instrument</span></div>
+  <div class="panel-body">
     <div class="drop" id="drop">
-      Drop <code>.wav</code> wavetables, Vital <code>.vitaltable</code> or <code>.vital</code> presets,
-      or a <code>.zip</code> of them, or click to choose files. One wavetable becomes one instrument.
+      Drop <strong>.wav</strong> wavetables, Vital <strong>.vitaltable</strong> / <strong>.vital</strong> presets,
+      or a <strong>.zip</strong> of them here, or click to choose files.
     </div>
     <input type="file" id="files" multiple accept=".wav,.vitaltable,.vital,.zip" hidden>
-    <canvas id="preview" height="140" style="display:none;margin-top:16px"></canvas>
+    <canvas id="preview" height="140" style="display:none;margin-top:12px"></canvas>
     <div class="note" id="fileinfo">No files selected yet.</div>
   </div>
+</div>
 
-  <div class="panel">
-    <h2>2. Options</h2>
+<div class="panel">
+  <div class="panel-head"><h2>2 · Options</h2><span class="hint">frames per instrument is capped at 12 by Renoise</span></div>
+  <div class="panel-body">
     <div class="opts">
       <label>Frames
         <select id="frames">
-          <option value="12" selected>12 (the ceiling)</option>
+          <option value="12" selected>12</option>
           <option value="8">8</option>
           <option value="6">6</option>
           <option value="4">4</option>
@@ -40,20 +46,20 @@
       </label>
       <label>Frame selection
         <select id="select">
-          <option value="spectral" selected>spectral (most different)</option>
-          <option value="even">even spacing</option>
+          <option value="spectral" selected>spectral</option>
+          <option value="even">even</option>
         </select>
       </label>
       <label>Cycle length
         <select id="cycle">
-          <option value="169" selected>169 samples = C-4</option>
+          <option value="169" selected>169 = C-4</option>
           <option value="338">338 = C-3</option>
           <option value="675">675 = C-2</option>
           <option value="1070">1070 = 41 Hz</option>
         </select>
       </label>
-      <label><input type="checkbox" id="sweep" checked> add the sweep template</label>
-      <label>Name suffix <input type="text" id="suffix" value=" WT" size="8"></label>
+      <label><input type="checkbox" id="sweep" checked> sweep template</label>
+      <label>Name suffix <input type="text" id="suffix" value=" WT" size="7"></label>
     </div>
     <div class="opts">
       <button id="build" disabled>Build instruments</button>
@@ -61,33 +67,41 @@
       <span id="status" class="dim"></span>
     </div>
     <div class="note">
-      Frames per instrument is capped at 12 because Renoise allows twelve voices per note column.
-      Cycle length sets both the register and how much high end a frame can hold: 169 samples sits
-      at C-4 with 84 harmonics, 1070 at 41 Hz with 535.
+      Cycle length sets register and headroom: 169 samples sits at C-4 with 84 harmonics, 1070 at
+      41 Hz with 535. Spectral frame selection keeps the frames that differ most, which sweeps
+      better than evenly spaced ones.
     </div>
   </div>
+</div>
 
-  <div class="panel" id="resultsPanel" style="display:none">
-    <h2>3. Results</h2>
-    <table>
+<div class="panel" id="resultsPanel" style="display:none">
+  <div class="panel-head"><h2>3 · Results</h2><span class="hint">click download per instrument</span></div>
+  <div class="panel-body">
+    <table class="rows">
       <thead><tr><th>Instrument</th><th>Source</th><th>Frames</th><th>Tuning</th><th>Size</th><th></th></tr></thead>
       <tbody id="results"></tbody>
     </table>
     <div class="note" id="warnings"></div>
   </div>
+</div>
 
-  <div class="panel">
-    <h2>What you get</h2>
-    <p>A gate-scan wavetable instrument: one sample slot per frame, a gate LFO per frame whose
-    triangle envelopes add up to 1.0, and macro 1 named <b>WT Position</b> walking the gate
-    positions. Drop the <code>.xrni</code> into
-    <code>~/.local/share/Renoise/User Library/Instruments/</code> (or the equivalent on your
-    platform), load it, hold a note and turn macro 1.</p>
-    <p class="dim">The converter runs entirely in this page: files are read with the File API and
-    the .xrni is assembled here, so nothing leaves your machine.</p>
+<div class="panel">
+  <div class="panel-head"><h2>What you get</h2></div>
+  <div class="panel-body">
+    <p>An <code>.xrni</code> with the frames stacked as sample slots, one gate LFO per slot whose
+    triangle envelopes add up to 1.0, and macro 1 named <strong>WT Position</strong> walking the
+    gate positions. Drop it in <code>User Library/Instruments/</code>, hold a note and turn the
+    macro.</p>
+    <p class="note">Nothing gets uploaded: your browser reads the files and assembles the zip
+    itself.</p>
   </div>
+</div>
 </main>
-
+<footer>
+  <span>gate-scan wavetables for Renoise</span>
+  <a href="https://github.com/mene311/renoise-wavetable-tools">source</a>
+  <a href="https://github.com/mene311/renoise-wavetable-instruments">instrument library</a>
+</footer>
 <script src="wt-builder.js"></script>
 <script>
 const WT = window.WTBuilder;
