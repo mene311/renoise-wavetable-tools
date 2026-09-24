@@ -6,6 +6,7 @@ name: Build wavetable instruments
 # 2. drop your wavetables into the wavetables/ folder and commit:
 #      .vitaltable / .vital   Vital wavetables and presets
 #      .wav                   Serum-style wavetables (N frames x 2048 samples)
+#      .zip                   a whole bank of the above, unpacked before the build
 #      .npy                   array of frames
 # 3. Actions -> "Build wavetable instruments" -> Run workflow
 # 4. download the "instruments" artifact when the run finishes
@@ -70,6 +71,20 @@ jobs:
             -print > /tmp/sources.txt
           echo "found $(wc -l < /tmp/sources.txt) wavetables"
           cat /tmp/sources.txt
+
+      - name: Unpack any zips of wavetables
+        run: |
+          shopt -s nullglob
+          for z in "${{ github.event.inputs.folder || 'wavetables' }}"/*.zip; do
+            out="/tmp/unpacked/$(basename "$z" .zip)"
+            mkdir -p "$out"
+            unzip -q -o "$z" -d "$out"
+            find "$out" -type f \
+              \( -iname '*.vitaltable' -o -iname '*.vital' -o -iname '*.wav' -o -iname '*.flac' \) \
+              >> /tmp/sources.txt
+            echo "$(basename "$z"): $(find "$out" -type f | wc -l) files unpacked"
+          done
+          echo "sources after unpacking: $(wc -l < /tmp/sources.txt)"
 
       - name: Build the instruments
         run: |

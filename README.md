@@ -107,7 +107,9 @@ The builder runs in GitHub Actions, so nothing has to be installed locally:
 
 1. Fork this repo (or use it directly).
 2. Drop your wavetables into `wavetables/` — `.vitaltable`, `.vital`, a Serum-style `.wav`, a
-   `.flac` or a `.npy` — and commit. One file becomes one instrument.
+   `.flac`, a `.npy`, or a `.zip` of any of those, which is unpacked first. One wavetable becomes
+   one instrument. GitHub's uploader takes a dragged folder but stops at 100 files, so a zip is the
+   practical way to move a whole bank.
 3. **Actions → Build wavetable instruments → Run workflow** (or just push, which triggers it).
    The run takes a few minutes; when it finishes, download the **instruments** artifact.
 4. Unzip it into `~/.local/share/Renoise/User Library/Instruments/` (Windows:

@@ -301,6 +301,32 @@
     return out;
   }
 
+  // ------------------------------------------------------------------ zip reading
+  // Local file headers only; store and deflate (the latter via DecompressionStream, which
+  // every current browser has). Used for dropping a zip of wavetables onto the page.
+  async function listZip(bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const out = [];
+    let at = 0;
+    while (at + 30 <= bytes.length && dv.getUint32(at, true) === 0x04034b50) {
+      const method = dv.getUint16(at + 8, true);
+      const size = dv.getUint32(at + 18, true);
+      const nameLen = dv.getUint16(at + 26, true);
+      const extraLen = dv.getUint16(at + 28, true);
+      const name = new TextDecoder().decode(bytes.subarray(at + 30, at + 30 + nameLen));
+      const start = at + 30 + nameLen + extraLen;
+      const data = bytes.subarray(start, start + size);
+      if (method === 0) {
+        out.push({ name, data });
+      } else if (typeof DecompressionStream !== "undefined") {
+        const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        out.push({ name, data: new Uint8Array(await new Response(stream).arrayBuffer()) });
+      }
+      at = start + size;
+    }
+    return out;
+  }
+
   // ----------------------------------------------------------------- wav write
   function wav16(frame, sampleRate) {
     const n = frame.length;
@@ -650,7 +676,7 @@
 
   const api = {
     buildFromWavetable, tuning, parseWav, readVital, detectCycles, oneCycle, normalize,
-    pickFrames, bandlimitResample, instrumentXml, zipStore, wav16, crc32, esc,
+    pickFrames, bandlimitResample, instrumentXml, zipStore, wav16, crc32, esc, listZip,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.WTBuilder = api;

@@ -1078,18 +1078,57 @@ def build_source(a):
     return out
 
 
+WAVETABLE_EXTS = (".wav", ".flac", ".vitaltable", ".vital", ".npy")
+
+
+def expand_sources(lines, tmpdir):
+    """Turn a batch listing into (path, name) pairs, unpacking any zip archives.
+
+    A zip of wavetables is the practical way to move a few hundred tables around (GitHub's
+    web uploader takes a folder, but only 100 files at a time), so a batch entry that is a
+    zip becomes one entry per wavetable member. Members that cannot make an instrument are
+    left to the normal skip path.
+    """
+    import zipfile
+    out = []
+    for line in lines:
+        parts = line.split("\t")
+        src = parts[0].strip()
+        name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+        if src.lower().endswith(".zip") and os.path.exists(src):
+            try:
+                with zipfile.ZipFile(src) as z:
+                    members = [m for m in z.namelist()
+                               if m.lower().endswith(WAVETABLE_EXTS) and not m.startswith("__MACOSX")]
+                    dig = os.path.join(tmpdir, os.path.splitext(os.path.basename(src))[0])
+                    os.makedirs(dig, exist_ok=True)
+                    for m in members:
+                        dest = os.path.join(dig, os.path.basename(m))
+                        with open(dest, "wb") as f:
+                            f.write(z.read(m))
+                        out.append((dest, os.path.splitext(os.path.basename(m))[0]))
+                    print(f"  {os.path.basename(src)}: {len(members)} wavetables unpacked")
+            except Exception as e:
+                print(f"  {os.path.basename(src)}: not readable as a zip ({e})")
+            continue
+        out.append((src, name or os.path.splitext(os.path.basename(src))[0]))
+    return out
+
+
+
 def run_batch(a):
     """Build every source listed in --sources-from, in this one process."""
     import copy, hashlib, time
     lines = [l.rstrip("\n") for l in open(a.sources_from) if l.strip()]
-    print(f"batch: {len(lines)} sources -> {a.outdir}")
+    print(f"batch: {len(lines)} entries -> {a.outdir}")
+    tmpdir = tempfile.mkdtemp(prefix="wt_batch_")
+    entries = expand_sources(lines, tmpdir)
+    if len(entries) != len(lines):
+        print(f"batch: {len(entries)} wavetables after unpacking zips")
     seen, built, skipped, failed = set(), 0, 0, 0
     t0 = time.time()
-    for i, line in enumerate(lines, 1):
-        parts = line.split("\t")
-        src = parts[0].strip()
-        name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else \
-            os.path.splitext(os.path.basename(src))[0]
+    total = len(entries)
+    for i, (src, name) in enumerate(entries, 1):
         ns = copy.copy(a)
         ns.source, ns.name, ns.vitaltable, ns.wavetable, ns.frames = src, name, None, None, None
         try:
@@ -1109,10 +1148,11 @@ def run_batch(a):
                 build_source(ns)
             built += 1
             out = buf.getvalue().strip().splitlines()
-            print(f"  [{i}/{len(lines)}] {name:48s} {out[-1] if out else ''}"[:150])
+            print(f"  [{i}/{total}] {name:48s} {out[-1] if out else ''}"[:150])
         except (Exception, SystemExit) as e:
             failed += 1
-            print(f"  [{i}/{len(lines)}] FAILED {name}: {str(e)[:100]}")
+            print(f"  [{i}/{total}] FAILED {name}: {str(e)[:100]}")
+    shutil.rmtree(tmpdir, ignore_errors=True)
     print(f"batch done: built {built}, skipped {skipped}, failed {failed}, "
           f"{time.time()-t0:.0f}s total ({(time.time()-t0)/max(1,built):.2f}s each)")
     return 0

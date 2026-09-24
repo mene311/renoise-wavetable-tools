@@ -121,30 +121,6 @@ function render() {
   });
 }
 
-// zip reading: local file headers, inflate with DecompressionStream when needed
-async function unzip(bytes) {
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const out = new Map();
-  let at = 0;
-  while (at + 30 <= bytes.length && dv.getUint32(at, true) === 0x04034b50) {
-    const method = dv.getUint16(at + 8, true);
-    const size = dv.getUint32(at + 18, true);
-    const nameLen = dv.getUint16(at + 26, true);
-    const extraLen = dv.getUint16(at + 28, true);
-    const name = new TextDecoder().decode(bytes.subarray(at + 30, at + 30 + nameLen));
-    const start = at + 30 + nameLen + extraLen;
-    const data = bytes.subarray(start, start + size);
-    if (method === 0) {
-      out.set(name, data);
-    } else if (typeof DecompressionStream !== "undefined") {
-      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-      out.set(name, new Uint8Array(await new Response(stream).arrayBuffer()));
-    }
-    at = start + size;
-  }
-  return out;
-}
-
 async function show(item) {
   const url = REPO_RAW + encodeURIComponent(item.category) + "/" + encodeURIComponent(item.instrument);
   document.getElementById("detailPanel").style.display = "block";
@@ -152,7 +128,8 @@ async function show(item) {
   document.getElementById("detailInfo").textContent = "fetching…";
   try {
     const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
-    const files = await unzip(bytes);
+    const entries = await WT.listZip(bytes);
+    const files = new Map(entries.map((e) => [e.name, e.data]));
     const xml = new TextDecoder().decode(files.get("Instrument.xml") || new Uint8Array());
     const frames = [...files.keys()].filter((k) => k.startsWith("SampleData/")).sort();
     const first = frames[0] ? files.get(frames[0]) : null;

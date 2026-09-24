@@ -18,10 +18,10 @@
   <div class="panel">
     <h2>1. Drop your wavetables</h2>
     <div class="drop" id="drop">
-      Drop <code>.wav</code> wavetables, Vital <code>.vitaltable</code> or <code>.vital</code> presets here,
-      or click to choose files. One file becomes one instrument.
+      Drop <code>.wav</code> wavetables, Vital <code>.vitaltable</code> or <code>.vital</code> presets,
+      or a <code>.zip</code> of them, or click to choose files. One wavetable becomes one instrument.
     </div>
-    <input type="file" id="files" multiple accept=".wav,.vitaltable,.vital" hidden>
+    <input type="file" id="files" multiple accept=".wav,.vitaltable,.vital,.zip" hidden>
     <canvas id="preview" height="140" style="display:none;margin-top:16px"></canvas>
     <div class="note" id="fileinfo">No files selected yet.</div>
   </div>
@@ -109,10 +109,10 @@ drop.addEventListener("drop", (e) => {
 fileInput.addEventListener("change", () => accept(Array.from(fileInput.files)));
 
 function accept(files) {
-  queued = files.filter((f) => /\.(wav|vitaltable|vital)$/i.test(f.name));
+  queued = files.filter((f) => /\.(wav|vitaltable|vital|zip)$/i.test(f.name));
   document.getElementById("fileinfo").textContent = queued.length
     ? queued.length + " file(s): " + queued.map((f) => f.name).join(", ")
-    : "Nothing usable dropped. Wanted .wav, .vitaltable or .vital.";
+    : "Nothing usable dropped. Wanted .wav, .vitaltable, .vital or a .zip of them.";
   document.getElementById("build").disabled = queued.length === 0;
   preview.style.display = "none";
   if (queued.length) previewFile(queued[0], Number(document.getElementById("frames").value));
@@ -165,13 +165,31 @@ document.getElementById("build").addEventListener("click", async () => {
   const suffix = document.getElementById("suffix").value;
   const warnings = [];
   let done = 0;
+  // a dropped zip is expanded here, so a bank of wavetables counts as a batch
+  const jobs = [];
   for (const file of queued) {
-    status.textContent = "building " + (++done) + "/" + queued.length + "…";
+    if (/\.zip$/i.test(file.name)) {
+      try {
+        const entries = await WT.listZip(new Uint8Array(await file.arrayBuffer()));
+        const wanted = entries.filter((e) => /\.(wav|vitaltable|vital)$/i.test(e.name) &&
+                                             !e.name.startsWith("__MACOSX"));
+        for (const e of wanted) jobs.push({ name: e.name.split("/").pop(), bytes: e.data });
+        warnings.push(file.name + ": " + wanted.length + " wavetables unpacked.");
+      } catch (err) {
+        warnings.push(file.name + ": could not read as a zip (" + err.message + ")");
+      }
+    } else {
+      jobs.push({ name: file.name, bytes: null, file });
+    }
+  }
+
+  for (const job of jobs) {
+    status.textContent = "building " + (++done) + "/" + jobs.length + "…";
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const base = file.name.replace(/\.[^.]+$/, "");
+      const bytes = job.bytes || new Uint8Array(await job.file.arrayBuffer());
+      const base = job.name.replace(/\.[^.]+$/, "");
       const out = WT.buildFromWavetable({
-        bytes, filename: file.name, name: base + suffix,
+        bytes, filename: job.name, name: base + suffix,
         frames, select, cycleLen, withSweep,
       });
       const blob = new Blob([out.xrni], { type: "application/zip" });
@@ -180,7 +198,7 @@ document.getElementById("build").addEventListener("click", async () => {
       results.push({ name, blob, url, report: out.report });
       const r = out.report;
       const row = document.createElement("tr");
-      row.innerHTML = "<td>" + name + "</td><td class='dim'>" + file.name +
+      row.innerHTML = "<td>" + name + "</td><td class='dim'>" + job.name +
         " <span class='tag'>" + r.kind + "</span></td><td>" + r.frames + " × " + r.cycleLen +
         "</td><td class='mono'>BaseNote " + r.tuning.baseNote + ", " + (r.tuning.finetune >= 0 ? "+" : "") +
         r.tuning.finetune + "¢</td><td>" + Math.round(blob.size / 1024) + " KB</td>" +
@@ -191,14 +209,14 @@ document.getElementById("build").addEventListener("click", async () => {
       if (r.tableFrames < frames) warnings.push(name + ": only " + r.tableFrames + " frames in the table, so " + r.tableFrames + " were used.");
     } catch (e) {
       const row = document.createElement("tr");
-      row.innerHTML = "<td class='err'>" + file.name + "</td><td colspan='5' class='err'>" + e.message + "</td>";
+      row.innerHTML = "<td class='err'>" + job.name + "</td><td colspan='5' class='err'>" + e.message + "</td>";
       tbody.appendChild(row);
     }
   }
   document.getElementById("warnings").innerHTML = warnings.length
     ? warnings.map((w) => "<div class='warn'>" + w + "</div>").join("")
     : "";
-  status.textContent = "built " + results.length + " of " + queued.length;
+  status.textContent = "built " + results.length + " of " + jobs.length;
   document.getElementById("downloadAll").disabled = results.length === 0;
 });
 
