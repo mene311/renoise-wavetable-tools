@@ -410,19 +410,23 @@ SWEEP_LFO_TPL = """          <LfoDevice type="LfoDevice">
 """
 
 
-def sweep_rig(lfo_idx=3, hydra_idx=4, macro_idx=5, rate=8.0):
-    """The rig that lives in the SUM chain, next to the gain and filter:
+def sweep_rig(rate=8.0):
+    """The rig that lives in the SUM chain, matching a layout wired by hand in Renoise:
 
-        0 MIXER (already there)  1 GAIN  2 LP FILTER  3 SWEEP  4 HYDRA -> MACROS  5 INSTR MACRO
+        0 MIXER (already there)  1 SWEEP  2 HYDRA -> MACROS  3 INSTR MACRO  4 LP FILTER  5 GAIN
 
-    One shaped LFO drives the Hydra, the Hydra's eight outputs land on macros 1-8 of the
-    instrument. Macro 1 is already mapped to the frame gates, so it walks the table, and
-    macros 2-8 are free for the user to map onto the gain and filter sitting right there.
+    One shaped LFO drives the Hydra's input (device 2, parameter 1), the Hydra's eight
+    outputs land on macros 1-8 of the Instrument Macros device (device 3, parameters 1-8).
+    Macro 1 is already mapped to the frame gates, so it walks the table; macros 2-8 are free
+    to map onto the filter (cutoff = param 2) and gain (volume = param 1) in this same chain.
+
+    Every index here was read out of a working instrument.
     """
+    lfo_idx, hydra_idx, macro_idx = 1, 2, 3
     # device indices arrive as arguments: 3 SWEEP, 4 HYDRA, 5 INSTR MACRO
     shape = [abs(1 - 2 * (i / 15.0)) for i in range(16)]
     pts = "\n".join(f"                <Point>{i},{v:.4f},0.0</Point>" for i, v in enumerate(shape))
-    lfo = SWEEP_LFO_TPL.format(dest_effect=hydra_idx, dest_param=3, rate=rate,
+    lfo = SWEEP_LFO_TPL.format(dest_effect=hydra_idx, dest_param="1.0", rate=rate,
                                length=16, points=pts)
 
     hydra = '          <HydraDevice type="HydraDevice">\n'
@@ -872,8 +876,9 @@ def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
                        + SEND_TPL.format(dest=sum_idx)))
     sum_devs = MIXER_TPL.format(name="Mixer", volume="1.0")
     if with_sweep:
-        # gain, filter and the sweep rig all live in the SUM chain, next to the mixer
-        sum_devs += GAINER_TPL + FILTER_TPL + sweep_rig(rate=sweep_rate)
+        # SUM chain order matches the hand-wired reference: mixer, sweep, hydra, macros,
+        # then the filter and gain it drives
+        sum_devs += sweep_rig(rate=sweep_rate) + FILTER_TPL + GAINER_TPL
     chains.append(("SUM", sum_devs))
 
     dc_xml = "    <DeviceChains>\n"
