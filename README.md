@@ -63,6 +63,31 @@ Folders of single-cycle waves, Vital `.vitaltable` files and `.vital` presets (t
 are in there, base64 encoded), Serum-format `.wav` wavetables, and `.npy` arrays.
 Need the opposite? `vitaltable_to_wav.py` writes a Serum-format `.wav` from a Vital table.
 
+## Instruments that hide a device from the GUI
+
+`--with-sweep` drops a shaped LFO, a Hydra and an **Instrument Macros** device into the
+instrument's SUM chain. That last one is not offered anywhere in the instrument editor's
+add-device menu, which makes it look impossible to create: it is not. An instrument's chain
+is a `SampleFilterDeviceChain`, and that type allows 65 device kinds, including
+`InstrumentMacroDevice`. Renoise loads it, keeps it and round-trips it when you save. It is
+only the GUI menu that leaves it out.
+
+So if you want one, either run the builder with `--with-sweep`, or add the device by hand to
+the `.xrni`: write an `<InstrumentMacroDevice type="InstrumentMacroDevice">` block into one of
+the instrument's `<DeviceChain>` elements (see `SWEEP` / `HYDRA` / `INSTR MACRO` in a built
+file for the field order), then reopen the instrument. Nothing else is needed.
+
+Parameter indices inside an instrument chain, read out of working files:
+
+| device | parameter | index |
+|---|---|---|
+| Hydra | input | 1 |
+| Instrument Macros | macro 1-8 | 1-8 |
+| Filter | cutoff | 2 |
+| Gainer | volume | 1 |
+| LFO | position / Reset | 8 |
+
+
 ## One caveat
 
 Some instruments play at a different pitch than the key you press. When the loudest part of

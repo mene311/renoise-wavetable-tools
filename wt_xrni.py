@@ -293,6 +293,45 @@ def encode_flac(frames_i16, sr, dst):
 
 
 
+KEYTRACKER_TPL = """          <KeyTrackingDevice type="KeyTrackingDevice">
+            <SelectedPresetName>Init</SelectedPresetName>
+            <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
+            <SelectedPresetIsModified>true</SelectedPresetIsModified>
+            <CustomDeviceName>KT -&gt; RESET</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </IsActive>
+            <SrcInstrument>-1</SrcInstrument>
+            <DestScaling>Linear</DestScaling>
+            <KeyTrackingMode>Clamp</KeyTrackingMode>
+            <KeyTrackingMin>36</KeyTrackingMin>
+            <KeyTrackingMax>72</KeyTrackingMax>
+            <DestTrack>
+              <Value>-1</Value>
+              <Visualization>Device only</Visualization>
+            </DestTrack>
+            <DestEffect>
+              <Value>{dest_effect}</Value>
+              <Visualization>Device only</Visualization>
+            </DestEffect>
+            <DestParameter>
+              <Value>8</Value>
+              <Visualization>Device only</Visualization>
+            </DestParameter>
+            <DestMin>
+              <Value>0.0</Value>
+              <Visualization>Device only</Visualization>
+            </DestMin>
+            <DestMax>
+              <Value>1.0</Value>
+              <Visualization>Device only</Visualization>
+            </DestMax>
+          </KeyTrackingDevice>
+"""
+
 GAINER_TPL = """          <GainerDevice type="GainerDevice">
             <SelectedPresetName>Init</SelectedPresetName>
             <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
@@ -410,17 +449,21 @@ SWEEP_LFO_TPL = """          <LfoDevice type="LfoDevice">
 """
 
 
-def sweep_rig(rate=8.0):
-    """Place the sweep infrastructure in the SUM chain and wire nothing up:
+def sweep_rig(rate=16.0):
+    """The bare template, placed in the SUM chain:
 
-        0 MIXER (already there)  1 SWEEP  2 HYDRA  3 INSTR MACRO
+        0 MIXER (already there)  1 SWEEP  2 HYDRA  3 INSTR MACRO  4 KT -> RESET
 
-    A shaped LFO, a Hydra and the Instrument Macros device. Every destination is left
-    unassigned on purpose, so whoever loads the instrument points the LFO at the Hydra, the
-    Hydra at whatever they want, and maps macros 2-8 to their own taste. Macro 1 already
-    walks the table.
+    Wired just far enough to be usable, and switched off:
 
-    Verified parameter indices inside an instrument chain, for wiring it up:
+      * SWEEP: shaped LFO, 16 lines per cycle, 16 line envelope (one step per pattern line),
+        destination pre-wired to the HYDRA input, IsActive 0 so nothing moves until the user
+        turns it on
+      * HYDRA: output 1 drives macro 1, which already walks the frame gates; outputs 2-9 free
+      * KT -> RESET: a Key Tracker on the SWEEP LFO's Reset parameter, so every note
+        restarts the sweep from the same point
+
+    Verified instrument-side parameter indices, for wiring the rest up:
 
         Hydra   input            param 1
         Macro   macro 1-8        params 1-8
@@ -429,21 +472,27 @@ def sweep_rig(rate=8.0):
         LFO     position/Reset   param 8
     """
     lfo_idx, hydra_idx, macro_idx = 1, 2, 3
-    UNASSIGNED = -1
     shape = [abs(1 - 2 * (i / 15.0)) for i in range(16)]
     pts = "\n".join(f"                <Point>{i},{v:.4f},0.0</Point>" for i, v in enumerate(shape))
-    lfo = SWEEP_LFO_TPL.format(dest_effect=UNASSIGNED, dest_param=UNASSIGNED, rate=rate,
+    lfo = SWEEP_LFO_TPL.format(dest_effect=hydra_idx, dest_param="1.0", rate=rate,
                                length=16, points=pts)
+    # the LFO ships switched off
+    lfo = lfo.replace("""            <CustomDeviceName>SWEEP</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>1.0</Value>""",
+"""            <CustomDeviceName>SWEEP</CustomDeviceName>
+            <IsMaximized>true</IsMaximized>
+            <IsSelected>false</IsSelected>
+            <IsActive>
+              <Value>0.0</Value>""")
 
-    hydra = '          <HydraDevice type="HydraDevice">\n'
-    hydra += MIXER_TPL.split("</SampleMixerDevice>")[0].replace(
-        "SampleMixerDevice", "HydraDevice").replace("Mixer</CustomDeviceName>",
-                                                    "HYDRA -> MACROS</CustomDeviceName>") if False else ""
     hydra = '          <HydraDevice type="HydraDevice">\n'
     hydra += """            <SelectedPresetName>Init</SelectedPresetName>
             <SelectedPresetLibrary>Bundled Content</SelectedPresetLibrary>
             <SelectedPresetIsModified>true</SelectedPresetIsModified>
-            <CustomDeviceName>HYDRA -&gt; MACROS</CustomDeviceName>
+            <CustomDeviceName>HYDRA</CustomDeviceName>
             <IsMaximized>true</IsMaximized>
             <IsSelected>false</IsSelected>
             <IsActive>
@@ -457,13 +506,13 @@ def sweep_rig(rate=8.0):
             </InputValue>
 """
     for i in range(1, 10):
-        eff, par = (-1, -1)              # left for the user to wire
+        eff, par = (macro_idx, 1) if i == 1 else (-1, -1)   # out 1 -> macro 1, the table sweep
         hydra += f"""            <Out{i}DestTrack>
               <Value>-1</Value>
               <Visualization>Device only</Visualization>
             </Out{i}DestTrack>
             <Out{i}DestEffect>
-              <Value>{eff if i <= 8 else -1}</Value>
+              <Value>{eff}</Value>
               <Visualization>Device only</Visualization>
             </Out{i}DestEffect>
             <Out{i}DestParameter>
@@ -519,10 +568,9 @@ def sweep_rig(rate=8.0):
             <LinkedInstrument>-1</LinkedInstrument>
           </InstrumentMacroDevice>
 """
-    return lfo + hydra + macros
+    return lfo + hydra + macros + KEYTRACKER_TPL.format(dest_effect=lfo_idx)
 
 
-# ------------------------------------------------------------- frame sources
 def _decode_vital_component(c, frame_size=None):
     """Returns (frames 2d array, sample_rate) for a Vital component, or (None, reason).
     Vital stores audio in two different ways:
@@ -834,7 +882,7 @@ def lowpass_frames(frames, f0, hz, taper=0.5):
 
 def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
           gate_offset=0.0, base_volume=0.0, base_note=None, finetune=None,
-          source="", jobs=None, with_sweep=False, sweep_rate=8.0, with_fx=False):
+          source="", jobs=None, with_sweep=False, sweep_rate=16.0, with_fx=False):
     import numpy as np
     n = len(frames)
     if n < 2:
@@ -1086,7 +1134,8 @@ def main():
                          "unassigned for the user to wire up")
     ap.add_argument("--with-fx", action="store_true",
                     help="also drop a Gainer and an Analog Filter into the SUM chain")
-    ap.add_argument("--sweep-rate", type=float, default=8.0, help="sweep LFO rate, lines per cycle")
+    ap.add_argument("--sweep-rate", type=float, default=16.0,
+                    help="sweep LFO rate in lines per cycle (default 16, one bar at LPB 4)")
     ap.add_argument("--mixed-lengths", action="store_true",
                     help="allow frame files of different lengths (e.g. one pitch per frame)")
     ap.add_argument("--select", choices=["even", "spectral"], default="even",
