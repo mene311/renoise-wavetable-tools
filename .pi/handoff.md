@@ -196,3 +196,23 @@ To rebuild anything from scratch: `wt_catalogue.py --scan --build --with-sweep` 
 instruments, 0.87 s each). Verify any instrument with
 `python3 tools/wt_verify.py "<path>.xrni"`. Test the web builder with
 `node /tmp/js_test.mjs` (builds both variants, schema-validates, compares frames to Python).
+
+## 2026-09-24 — library page: fetch, category view, batches
+
+Reported from the phone: clicking a wavetable in the library browser gave
+"NetworkError when attempting to fetch resource".
+
+- Cause: the click and the per-row `get` link used `https://github.com/…/raw/…`, which answers
+  302 with an empty `access-control-allow-origin`, so `fetch()` always failed. Two CORS-friendly
+  mirrors now (`raw.githubusercontent.com`, then jsDelivr).
+- Second fault behind it: `library.html` called `WT.*` while `wt-builder.js` publishes
+  `WTBuilder`, so nothing it fetched could be parsed. Alias added there and in `selftest.html`;
+  `index.html` already had one (my first attempt duplicated that `const` and broke the builder
+  page with a SyntaxError until the browser check caught it).
+- Third: Renoise stores sample data inside the .xrni as FLAC, so `WT.parseWav` fails on every
+  published instrument. The draw path now decodes wav or flac (browsers decode flac themselves).
+- New: by category view with counts and a per-category batch button, checkboxes + select all shown,
+  zip built in the page with `WT.zipStore`, progress and failure reporting, favicon.
+- New test: `tests/browser_check.py` (playwright drives /usr/bin/chromium). 15 checks, runs local
+  and against the deployed URL, fails on console errors. Verified 15/15 both ways.
+  Needs a venv with playwright: `~/.local/venvs/browser/bin/python tests/browser_check.py`.

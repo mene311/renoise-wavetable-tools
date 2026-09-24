@@ -148,6 +148,37 @@ envelopes add up to 1.0, and one macro that walks the table, which is what Renoi
 Discord use.
 
 
+## In the browser, with the library
+
+The pages in `docs/` do the whole conversion client-side, and the library page browses what
+came out:
+
+- **Builder** — drop wavetables (or a zip of them), pick how many frames, build, download one
+  or all. Nothing is uploaded.
+- **Library** — every published instrument, searchable, with a by category view that shows what
+  each timbre folder holds. Clicking a row fetches that instrument and draws its first frame,
+  reading the sample whether Renoise stored it as wav or as flac.
+- **Batches** — tick instruments and take them as one zip, or take a whole category with its own
+  button. The zip keeps the `category/name.xrni` layout, so it unzips into the right folders. A
+  batch is fetched file by file and zipped in the page, which is why a few hundred of them take
+  a moment.
+
+Both pages read the instrument repository from `raw.githubusercontent.com`, with jsDelivr as a
+fallback. The `github.com/.../raw/` URL looks equivalent and is not: it redirects without an
+`Access-Control-Allow-Origin` header, so a browser fetch against it always fails.
+
+`tests/browser_check.py` drives both pages in a real browser — it builds an instrument from a
+synthesised wavetable, re-reads the result, clicks a library row, runs a batch download, and
+fails on any console error. Run it after touching `docs/`:
+
+```sh
+python tests/browser_check.py                                     # local server
+python tests/browser_check.py --url https://mene311.github.io/renoise-wavetable-tools/
+```
+
+`docs/selftest.html` is the lighter version for anyone wondering whether their browser can reach
+the repository at all.
+
 ## One caveat
 
 Some instruments play at a different pitch than the key you press. When the loudest part of
