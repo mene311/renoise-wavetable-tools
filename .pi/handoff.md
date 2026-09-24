@@ -89,6 +89,16 @@ params 1-8, filter cutoff 2, gainer volume 1, LFO position/Reset 8.
   run the Workflow, download the artifact. Tested green (run 36050483695, artifact contained a
   valid rigged instrument).
 
+### Batches, and how big things get in
+- Multi-file: GitHub's uploader takes multiple files and a **dragged folder**, but caps at **100
+  files at a time**, and 25 MiB per file through the browser (100 MiB via git).
+- **Zip support, all three paths**: `expand_sources()` in `wt_xrni.py` unpacks zip entries into the
+  batch listing, the workflow unzips before building, and the browser expands a dropped zip with
+  the shared `listZip()` reader (store and deflate via `DecompressionStream`).
+- Tested: CLI (zip of 2 → 2 valid instruments), browser under node (2 → 2 valid), and the workflow
+  in the cloud (run `36057088905`: 2 unpacked, 1 duplicate skipped by `--dedupe`, 2 built, 13/13
+  verified, artifact uploaded).
+
 ### GitHub
 - `renoise-wavetable-tools` public: tools, Renoise tool, docs site, READMEs unslopped
   (noslop 0.0/1k).
