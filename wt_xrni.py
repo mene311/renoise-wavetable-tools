@@ -248,6 +248,34 @@ def bandlimit_resample(cyc, n_out):
     return np.fft.irfft(Y, n=n_out)
 
 
+def _encode_job(args):
+    """Worker for parallel frame encoding (module level so it can be pickled)."""
+    samples, sr, dst = args
+    return dst, encode_flac(samples, sr, dst)
+
+
+def encode_frames(items, jobs=None):
+    """items = [(samples_i16, sr, dst)]. Returns [(dst, nframes)] in order.
+    One ffmpeg per frame is most of the build time, so run them in parallel."""
+    if not jobs:            # None or 0 = auto
+        jobs = int(os.environ.get("WT_JOBS", "0")) or min(8, (os.cpu_count() or 4))
+    if jobs <= 1 or len(items) <= 1:
+        return [(dst, encode_flac(samples, sr, dst)) for samples, sr, dst in items]
+    # fork context: children do not re-import __main__, so this stays safe when the
+    # module is imported by another script. Any failure falls back to serial.
+    try:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        try:
+            ctx = multiprocessing.get_context("fork")
+        except ValueError:
+            ctx = None
+        with ProcessPoolExecutor(max_workers=min(jobs, len(items)), mp_context=ctx) as ex:
+            return list(ex.map(_encode_job, items))
+    except Exception:
+        return [(dst, encode_flac(samples, sr, dst)) for samples, sr, dst in items]
+
+
 def encode_flac(frames_i16, sr, dst):
     """Write frames (int16 array) to FLAC via ffmpeg; returns frame count."""
     import numpy as np
@@ -382,11 +410,56 @@ def root_report(name, frames, cycle_len, brightness=None, sr=SR):
     print(f"    keyboard map        {km}   (BaseNote {base})")
 
 
+def detect_cycles(frame, rel=0.02):
+    """How many cycles does this frame actually contain? GCD of the significant
+    spectral bins: 1 means it is a single cycle, 8 means the frame repeats 8 times
+    (and must be sliced before resampling, or it plays 8x too high)."""
+    import numpy as np, math
+    a = np.asarray(frame, dtype=np.float64)
+    a = a - a.mean()
+    X = np.abs(np.fft.rfft(a))
+    if X.max() <= 0:
+        return 1
+    idx = [int(b) for b in np.nonzero(X > rel * X.max())[0] if b > 0]
+    if not idx:
+        return 1
+    g = 0
+    for b in idx:
+        g = math.gcd(g, b)
+        if g == 1:
+            return 1
+    return max(1, g)
+
+
+def table_cycles(frames):
+    """One cycle count for a whole table (frames of a table share a pitch)."""
+    from collections import Counter
+    gs = [detect_cycles(f) for f in frames]
+    g, cnt = Counter(gs).most_common(1)[0]
+    return g if (g > 1 and cnt >= max(2, len(frames) // 2)) else 1
+
+
+def one_cycle(frame, cycles=None):
+    """Slice a frame down to one cycle (averaging the repeats for a bit of noise
+    rejection) so that resampling it does not multiply the pitch."""
+    import numpy as np
+    frame = np.asarray(frame, dtype=np.float64)
+    g = int(cycles or detect_cycles(frame))
+    if g <= 1:
+        return frame
+    n = len(frame) // g
+    if n <= 0:
+        return frame
+    parts = np.array([frame[i * n:(i + 1) * n] for i in range(g)])
+    return parts.mean(axis=0)
+
+
+
 def _res(a, cycle_len):
     return a if not cycle_len else bandlimit_resample(a, cycle_len)
 
 
-def frames_from_vital(path, n_frames, cycle_len, table=0, verbose=True, select='even'):
+def frames_from_vital(path, n_frames, cycle_len, table=0, verbose=True, select='even', cycles=None):
     """Frames from a Vital .vitaltable OR a .vital preset (which embeds its
     wavetable inline at settings.wavetables[n])."""
     import numpy as np, bisect
@@ -414,17 +487,20 @@ def frames_from_vital(path, n_frames, cycle_len, table=0, verbose=True, select='
     table_frames, sr, kind = got
     if verbose:
         print(f"   {kind}: {table_frames.shape[0]} frames x {table_frames.shape[1]} samples @ {sr} Hz")
+    cycles = cycles or table_cycles(table_frames)
+    if cycles > 1 and verbose:
+        print(f"   pitch detection: frames contain {cycles} cycles -> slicing one cycle")
     if n_frames <= 0:          # 0 = all native frames, no selection/blending
-        return np.array([_res(f, cycle_len) for f in table_frames]), sr, cycle_len
+        return np.array([_res(one_cycle(f, cycles), cycle_len) for f in table_frames]), sr, cycle_len
     picked, idxs = select_table_frames(table_frames, n_frames, select)
     if verbose:
         print(f"   using {'interpolated' if idxs is None else 'frames'} "
               f"{idxs if idxs is not None else '0..%d blended' % (len(table_frames)-1)} "
               f"-> band-limited to {cycle_len}-sample cycles")
-    return np.array([_res(f, cycle_len) for f in picked]), sr, cycle_len
+    return np.array([_res(one_cycle(f, cycles), cycle_len) for f in picked]), sr, cycle_len
 
 
-def frames_from_serum_wav(path, n_frames, cycle_len, frame_size=None, verbose=True, select='even'):
+def frames_from_serum_wav(path, n_frames, cycle_len, frame_size=None, verbose=True, select='even', cycles=None):
     """Frames from a Serum-style wavetable .wav (N frames x 2048 samples)."""
     import numpy as np
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "f32le",
@@ -439,14 +515,17 @@ def frames_from_serum_wav(path, n_frames, cycle_len, frame_size=None, verbose=Tr
     tf = a.reshape(n, ws)
     if verbose:
         print(f"   wavetable: {n} frames x {ws} samples")
+    cycles = cycles or table_cycles(tf)
+    if cycles > 1 and verbose:
+        print(f"   pitch detection: frames contain {cycles} cycles -> slicing one cycle")
     if n_frames <= 0:
-        return np.array([_res(f, cycle_len) for f in tf]), SR, cycle_len
+        return np.array([_res(one_cycle(f, cycles), cycle_len) for f in tf]), SR, cycle_len
     picked, idxs = select_table_frames(tf, n_frames, select)
     if verbose:
         print(f"   using {'interpolated' if idxs is None else 'frames'} "
               f"{idxs if idxs is not None else '0..%d blended' % (len(tf)-1)} "
               f"-> band-limited to {cycle_len}-sample cycles")
-    return np.array([_res(f, cycle_len) for f in picked]), SR, cycle_len
+    return np.array([_res(one_cycle(f, cycles), cycle_len) for f in picked]), SR, cycle_len
 
 
 def frames_from_dir(path, resample_cycle=None, allow_mixed=False):
@@ -470,17 +549,17 @@ def frames_from_dir(path, resample_cycle=None, allow_mixed=False):
     return (np.array(out) if len(n) == 1 else out), SR, (resample_cycle or len(out[0]))
 
 
-def load_source(path, n_frames, cycle_len, frame_size=None, table=0, select='even', allow_mixed=False):
+def load_source(path, n_frames, cycle_len, frame_size=None, table=0, select='even', allow_mixed=False, cycles=None):
     if os.path.isdir(path):
         print(f"frame dir: {path}")
         return frames_from_dir(path, cycle_len, allow_mixed)
     ext = os.path.splitext(path)[1].lower()
     if ext in (".vitaltable", ".vital"):
         print(f"vital: {path}")
-        return frames_from_vital(path, n_frames, cycle_len, table=table, select=select)
+        return frames_from_vital(path, n_frames, cycle_len, table=table, select=select, cycles=cycles)
     if ext in (".wav", ".flac", ".aif", ".aiff"):
         print(f"wavetable file: {path}")
-        return frames_from_serum_wav(path, n_frames, cycle_len, frame_size, select=select)
+        return frames_from_serum_wav(path, n_frames, cycle_len, frame_size, select=select, cycles=cycles)
     raise SystemExit(f"{path}: unsupported source (use .vitaltable/.vital, a Serum-style .wav, or a frame directory)")
 
 
@@ -500,9 +579,31 @@ def triangle_points(n_frames, spacing, frame_idx):
     return L, pts
 
 
+def lowpass_frames(frames, f0, hz, taper=0.5):
+    """Band-limit single-cycle frames to `hz` at playback root `f0`: keeps harmonics
+    up to hz/f0 and fades the top `taper` fraction of those out smoothly, so bright
+    growl tables stop screeching without turning into a buzzsaw."""
+    import numpy as np
+    if not hz or hz <= 0:
+        return frames
+    keep = max(2, int(hz / max(f0, 1e-9)))
+    out = []
+    for a in frames:
+        X = np.fft.rfft(a)
+        n = min(keep + 1, len(X))
+        fade_from = max(1, int(keep * (1.0 - taper)))
+        w = np.ones(len(X))
+        w[n:] = 0.0
+        if fade_from < keep:
+            w[fade_from:keep + 1] = 0.5 * (1 + np.cos(np.pi * (np.arange(fade_from, keep + 1) - fade_from)
+                                                     / max(1, keep - fade_from)))
+        out.append(np.fft.irfft(X * w, n=len(a)))
+    return np.array(out)
+
+
 def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
           gate_offset=0.0, base_volume=0.0, base_note=None, finetune=None,
-          source=""):
+          source="", jobs=None):
     import numpy as np
     n = len(frames)
     if n < 2:
@@ -516,19 +617,19 @@ def build(frames, name, sr, cycle_len, out_path, spacing=2, gate_amp=1.0,
         finetune = ft if finetune is None else finetune
 
     tmp = tempfile.mkdtemp(prefix="wt_xrni_")
-    audio = []
-    samples_xml = []
+    todo = []
     for i, f in enumerate(frames):
         a = np.asarray(f, dtype=np.float64)
         peak = np.abs(a).max()
         if peak > 0:
             a = a / peak
         fname = f"Sample{i:02d} (frame {i+1:02d}).flac"
-        nframes = encode_flac(np.clip(a, -1, 1) * 32767.0, sr, os.path.join(tmp, fname))
-        audio.append(fname)
-        samples_xml.append(SAMPLE_TPL.format(name=f"frame {i+1:02d}", finetune=finetune,
-                                             loop_end=nframes, chain=i + 1,
-                                             base_note=base_note))
+        todo.append((np.clip(a, -1, 1) * 32767.0, sr, os.path.join(tmp, fname)))
+    encoded = encode_frames(todo, jobs)
+    audio = [os.path.basename(dst) for dst, _ in encoded]
+    samples_xml = [SAMPLE_TPL.format(name=f"frame {i+1:02d}", finetune=finetune,
+                                    loop_end=nf, chain=i + 1, base_note=base_note)
+                   for i, (_, nf) in enumerate(encoded)]
 
     # --- device chains: chain 0 = gates (LFOs), 1..n = frame chains, n+1 = SUM
     sum_idx = n + 1
@@ -632,6 +733,8 @@ def main():
     ap.add_argument("--frames", help="directory of single-cycle .wav/.flac frames")
     ap.add_argument("--table", type=int, default=0, help="which embedded table (for .vital presets)")
     ap.add_argument("--frame-size", type=int, help="frame size for .wav wavetables (default: auto)")
+    ap.add_argument("--jobs", type=int, default=0,
+                    help="parallel frame encoders (0 = auto: min(8, cpus), 1 = serial)")
     ap.add_argument("--mixed-lengths", action="store_true",
                     help="allow frame files of different lengths (e.g. one pitch per frame)")
     ap.add_argument("--select", choices=["even", "spectral"], default="even",
@@ -646,6 +749,10 @@ def main():
     ap.add_argument("--root-min", type=float, default=41.2, help="lowest root the auto picker may choose (Hz)")
     ap.add_argument("--root-max", type=float, default=261.63,
                     help="highest root the auto picker may choose (Hz; default C-4 — never brighter than that)")
+    ap.add_argument("--lowpass", type=float, default=0.0,
+                    help="band-limit the frames to this frequency (Hz) at the chosen root, "
+                         "with a soft rolloff; use it to tame bright growl/bass tables")
+    ap.add_argument("--taper", type=float, default=0.5, help="fraction of the kept band that fades out")
     ap.add_argument("--report", action="store_true", help="print the brightness/root analysis and exit")
     ap.add_argument("--cycle-len", type=int, default=169,
                     help="samples per cycle when extracting (169 = C-4 @44.1k)")
@@ -688,6 +795,13 @@ def main():
         frames, sr, cycle = load_source(src, a.n_frames, cycle,
                                         frame_size=a.frame_size, table=a.table, select=a.select,
                                         allow_mixed=a.mixed_lengths)
+        if a.lowpass:
+            import numpy as _np
+            f0 = sr / float(cycle or len(_np.atleast_2d(frames)[0]))
+            frames = lowpass_frames(_np.atleast_2d(frames), f0, a.lowpass, a.taper)
+            kept = max(2, int(a.lowpass / max(f0, 1e-9)))
+            print(f"  lowpass: {a.lowpass:.0f} Hz at root {f0:.1f} Hz -> keeping "
+                  f"{kept} harmonics ({kept*f0:.0f} Hz ceiling)")
     elif a.npy:
         import numpy as np
         src = a.npy
@@ -696,8 +810,9 @@ def main():
     else:
         raise SystemExit("need --vitaltable, --frames or --npy")
 
-    out = os.path.join(a.outdir, re.sub(r"[^\w. ()-]+", "_", a.name) + ".xrni")
+    out = os.path.join(a.outdir, re.sub(r"[^\w. (),-]+", "_", a.name) + ".xrni")
     build(frames, a.name, sr, cycle, out, spacing=a.spacing, gate_amp=a.gate_amp,
+          jobs=a.jobs,
           gate_offset=a.gate_offset, base_volume=a.base_volume, base_note=a.base_note,
           finetune=a.finetune, source=src)
     validate(out)
