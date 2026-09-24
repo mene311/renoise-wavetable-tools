@@ -66,8 +66,7 @@ Need the opposite? `vitaltable_to_wav.py` writes a Serum-format `.wav` from a Vi
 ## One caveat
 
 Some instruments play at a different pitch than the key you press. When the loudest part of
-the wave isn't the fundamental, the note comes out an octave or a twelfth away, and high
-top octaves get rough, since harmonics that no longer fit under Nyquist fold back down.
+the wave isn't the fundamental, the note comes out an octave or a twelfth away, and the top octaves get rough, since harmonics that no longer fit under Nyquist fold back down.
 Looping one cycle in a sampler does that.
 
 ## Credits
