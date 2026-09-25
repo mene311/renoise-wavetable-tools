@@ -24,10 +24,10 @@
       <Length>128</Length>
       <ValueQuantum>0.0</ValueQuantum>
       <Points>
-        <Point>0,1.0000,0.000</Point>
-        <Point>1,0.5247,0.000</Point>
-        <Point>2,0.1823,0.000</Point>
-        <Point>3,0.0299,0.000</Point>
+        <Point>0,0.0000,0.000</Point>
+        <Point>1,0.0000,0.000</Point>
+        <Point>2,0.0000,0.000</Point>
+        <Point>3,0.0000,0.000</Point>
         <Point>4,0.0000,0.000</Point>
         <Point>5,0.0000,0.000</Point>
         <Point>6,0.0000,0.000</Point>
@@ -149,10 +149,10 @@
         <Point>122,0.0000,0.000</Point>
         <Point>123,0.0000,0.000</Point>
         <Point>124,0.0000,0.000</Point>
-        <Point>125,0.0000,0.000</Point>
-        <Point>126,0.0000,0.000</Point>
-        <Point>127,0.0000,0.000</Point>
-        <Point>128,0.0000,0.000</Point>
+        <Point>125,0.0625,0.000</Point>
+        <Point>126,0.2799,0.000</Point>
+        <Point>127,0.4922,0.000</Point>
+        <Point>128,0.4792,0.000</Point>
       </Points>
     </CustomEnvelope>
   </DeviceSlot>
