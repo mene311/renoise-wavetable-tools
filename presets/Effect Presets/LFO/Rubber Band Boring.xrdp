@@ -20,107 +20,18 @@
       <Value>4</Value>
     </Type>
     <CustomEnvelope>
-      <PlayMode>Lines</PlayMode>
+      <PlayMode>Curve</PlayMode>
       <Length>96</Length>
       <ValueQuantum>0.0</ValueQuantum>
       <Points>
         <Point>0,0.0000,0.000</Point>
-        <Point>1,0.0674,0.000</Point>
-        <Point>2,0.1349,0.000</Point>
-        <Point>3,0.2023,0.000</Point>
-        <Point>4,0.2697,0.000</Point>
-        <Point>5,0.3371,0.000</Point>
-        <Point>6,0.4046,0.000</Point>
-        <Point>7,0.4720,0.000</Point>
-        <Point>8,0.5394,0.000</Point>
-        <Point>9,0.6069,0.000</Point>
-        <Point>10,0.6743,0.000</Point>
-        <Point>11,0.7348,0.000</Point>
-        <Point>12,0.7677,0.000</Point>
-        <Point>13,0.7590,0.000</Point>
-        <Point>14,0.7228,0.000</Point>
-        <Point>15,0.6796,0.000</Point>
-        <Point>16,0.6364,0.000</Point>
-        <Point>17,0.5932,0.000</Point>
-        <Point>18,0.5500,0.000</Point>
-        <Point>19,0.5068,0.000</Point>
-        <Point>20,0.4636,0.000</Point>
-        <Point>21,0.4204,0.000</Point>
-        <Point>22,0.3772,0.000</Point>
-        <Point>23,0.3388,0.000</Point>
-        <Point>24,0.3196,0.000</Point>
-        <Point>25,0.3293,0.000</Point>
-        <Point>26,0.3582,0.000</Point>
-        <Point>27,0.3918,0.000</Point>
-        <Point>28,0.4255,0.000</Point>
-        <Point>29,0.4592,0.000</Point>
-        <Point>30,0.4928,0.000</Point>
-        <Point>31,0.5265,0.000</Point>
-        <Point>32,0.5602,0.000</Point>
-        <Point>33,0.5938,0.000</Point>
-        <Point>34,0.6275,0.000</Point>
-        <Point>35,0.6574,0.000</Point>
-        <Point>36,0.6725,0.000</Point>
-        <Point>37,0.6651,0.000</Point>
-        <Point>38,0.6428,0.000</Point>
-        <Point>39,0.6168,0.000</Point>
-        <Point>40,0.5908,0.000</Point>
-        <Point>41,0.5648,0.000</Point>
-        <Point>42,0.5388,0.000</Point>
-        <Point>43,0.5128,0.000</Point>
-        <Point>44,0.4868,0.000</Point>
-        <Point>45,0.4608,0.000</Point>
-        <Point>46,0.4348,0.000</Point>
-        <Point>47,0.4116,0.000</Point>
-        <Point>48,0.3996,0.000</Point>
-        <Point>49,0.4044,0.000</Point>
-        <Point>50,0.4204,0.000</Point>
-        <Point>51,0.4392,0.000</Point>
-        <Point>52,0.4580,0.000</Point>
-        <Point>53,0.4768,0.000</Point>
-        <Point>54,0.4956,0.000</Point>
-        <Point>55,0.5144,0.000</Point>
-        <Point>56,0.5332,0.000</Point>
-        <Point>57,0.5520,0.000</Point>
-        <Point>58,0.5709,0.000</Point>
-        <Point>59,0.5876,0.000</Point>
-        <Point>60,0.5963,0.000</Point>
-        <Point>61,0.5928,0.000</Point>
-        <Point>62,0.5812,0.000</Point>
-        <Point>63,0.5675,0.000</Point>
-        <Point>64,0.5539,0.000</Point>
-        <Point>65,0.5402,0.000</Point>
-        <Point>66,0.5266,0.000</Point>
-        <Point>67,0.5129,0.000</Point>
-        <Point>68,0.4993,0.000</Point>
-        <Point>69,0.4856,0.000</Point>
-        <Point>70,0.4720,0.000</Point>
-        <Point>71,0.4602,0.000</Point>
-        <Point>72,0.4556,0.000</Point>
-        <Point>73,0.4619,0.000</Point>
-        <Point>74,0.4754,0.000</Point>
-        <Point>75,0.4908,0.000</Point>
-        <Point>76,0.5061,0.000</Point>
-        <Point>77,0.5215,0.000</Point>
-        <Point>78,0.5368,0.000</Point>
-        <Point>79,0.5522,0.000</Point>
-        <Point>80,0.5676,0.000</Point>
-        <Point>81,0.5829,0.000</Point>
-        <Point>82,0.5983,0.000</Point>
-        <Point>83,0.6127,0.000</Point>
-        <Point>84,0.6199,0.000</Point>
-        <Point>85,0.6084,0.000</Point>
-        <Point>86,0.5733,0.000</Point>
-        <Point>87,0.5242,0.000</Point>
-        <Point>88,0.4717,0.000</Point>
-        <Point>89,0.4193,0.000</Point>
-        <Point>90,0.3669,0.000</Point>
-        <Point>91,0.3145,0.000</Point>
-        <Point>92,0.2621,0.000</Point>
-        <Point>93,0.2097,0.000</Point>
-        <Point>94,0.1572,0.000</Point>
-        <Point>95,0.1048,0.000</Point>
-        <Point>96,0.0524,0.000</Point>
+        <Point>12,0.8091,0.000</Point>
+        <Point>24,0.2908,0.000</Point>
+        <Point>36,0.6948,0.000</Point>
+        <Point>48,0.3828,0.000</Point>
+        <Point>60,0.6085,0.000</Point>
+        <Point>72,0.4447,0.000</Point>
+        <Point>84,0.6290,0.000</Point>
       </Points>
     </CustomEnvelope>
   </DeviceSlot>
