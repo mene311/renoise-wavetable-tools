@@ -4,13 +4,18 @@
 > <https://mene311.github.io/renoise-hub/> (repo `~/Projects/renoise-hub`).
 
 
-**Status: PAUSED, nothing running.** Last session built the tooling, the library, the Renoise tool
-and the web builder, and the instruments repo was refreshed (commit `b08b792`). Small leftovers are
-listed under Remaining.
+**Status: PAUSED, nothing running.** The tooling, the library, the Renoise tool and the web builder
+are built and published; the instruments carry the sweep rig and the duplicate check works.
+Open items are listed under Remaining, and the newest one is a wrap bug in the sibling session's
+sparse LFO presets.
 
 Repo: `~/Projects/renoise-wavetable-tools` → https://github.com/mene311/renoise-wavetable-tools
-Instruments: https://github.com/mene311/renoise-wavetable-instruments (2,342, pre-rig)
+Instruments: https://github.com/mene311/renoise-wavetable-instruments (2,335 files, rig baked in,
+last commit `a05a2de`)
 Site: https://mene311.github.io/renoise-wavetable-tools/ (Pages, source `/docs`)
+Themes gallery: https://mene311.github.io/renoise-forum-color-themes/ (Pages, repo root)
+Local library: `~/.local/share/Renoise/User Library/Instruments/Wavetables/` — 2,319 filed by timbre
++ 16 flat variants, every filed instrument rigged and phase-fixed
 
 ## Mission
 
@@ -299,3 +304,111 @@ Asked for: the survey set, the dissected instruments and the test builds.
 - Watch out: after an index rebuild, raw serves the old copy for a minute or two, and jsDelivr for
   much longer, so a check run immediately after can report the previous count. Not a bug in the
   page; wait and re-run.
+
+---
+
+# 2026-09-25 (night) — gallery theme, downloads, and the wub that never arrived
+
+## Theme gallery matched to the hub
+`~/Projects/renoise-forum-color-themes` (Pages from the repo root, commit `71474e4`):
+- `style.css` is now the hub's stylesheet, verbatim, with a header comment saying it is mirrored
+  from `renoise-hub/style.css` — **keep the two in step** (hub is the source of truth).
+- `gallery.css` is the only page-specific file and uses hub tokens exclusively (no new colours).
+- Markup moved to the hub's idiom: `.site-header` with the hub logo linking home + the same nav
+  (`Themes` marked active), hero band, the filters in a `.panel`, `tag` badges instead of coloured
+  pills, hub footer. Filters, sorting, palette filter, variant grouping and lazy previews unchanged.
+- Verified by measuring screenshots rather than by eye (the vision tool is unavailable in this
+  session): header `#161618`, borders `#2e2e34`, page `#0e0e10`, panels `#1e1e22`, accent `#6f9f40`,
+  identical to the hub; 560 cards render, count reads `560 / 560`.
+
+## .xrnc downloads forced (server side, free)
+`github.com/…/raw/master/themes/x.xrnc` serves `text/plain`, so Firefox *displays* the theme.
+`mene311.github.io/…/themes/x.xrnc` serves `application/octet-stream` → downloads. Links now point
+at the site's own origin and carry `download="<file>"` (only honoured same-origin). Verified live:
+`content-type: application/octet-stream`, 560/560 catalog files present, no `raw/master` links left.
+Note: `github.io` cannot set `Content-Disposition` at all — if raw-CDN links are ever wanted, a host
+that allows headers (Cloudflare Transform Rules / `_headers`) is required.
+
+## The wub: shapes did not start at zero
+Measured across the 133 `.vitallfo`: **71 began at their peak**, only 35 had the low point at line 0.
+A Renoise LFO starts at its first point, so on a cutoff the modulation began wide open with nowhere
+to travel — no wub. Both converters in `~/Projects/renoise/tools/` now rotate each shape to start at
+its low point (`align_to_low`, 85 of 133 needed it, `--no-align` opts out): `Sin` went from
+`first 1.000, low at line 48` to `first 0.000, low at 0, peak at 48`. Regenerated and published all
+133 `.xrdp` + 133 `.xrno` (library + `presets/`), plus `WT Sweep 16.xrdp` = the shape the instruments
+bake, now `0 → peak → 0`.
+
+## Instrument rig: order and baked shape
+- Chain order now reads left to right the way Renoise's own `KT - Rnd - Hydra.xrnt` does
+  (KT 1 → LFO 2 → Hydra 3, KT → param 8): **Mixer, KT -> RESET, SWEEP, HYDRA, INSTR MACRO**.
+  Previously the KT sat last, after the LFO it resets.
+- The baked sweep shape starts at its low point: `scan_shape` went from `abs(1 - 2*(i/15))`
+  (peak at line 0, the old behaviour) to `1 - abs(1 - 2*(i/15))` — zero at line 0, peak mid-cycle.
+- Rebuilt the whole library (2,318 built, 0 failed, one source was a 0-byte file). Verified on all
+  2,319 filed instruments: rigged, KT-first, first envelope value `0.0`, zero stale duplicates.
+- Remote verified: `REMOTE SUM chain: Mixer, KT -> RESET, SWEEP, HYDRA, INSTR MACRO`, envelope
+  `0,0.0000  1,0.1333 … 15,0.0000`. Frames untouched — 8/8 spot check byte-identical to
+  `hashes/index.json`, so the index needed no regeneration.
+
+## Duplicate check (the site's upload comparison)
+Two faults, both fixed:
+1. **Frame selection drifted.** A batch-mode rewrite of `wt_catalogue.py` dropped the
+   `--select spectral` flag the per-source version passed, so the library was built *even* while the
+   site's builder defaults to *spectral* → every default upload matched no frames and read "new".
+   Fixed the catalogue, rebuilt the library on spectral, re-synced the instruments repo and
+   regenerated `hashes/index.json` (2,339 entries). Also fixed 100 build failures: `spectral` on
+   tables with 1–2 native frames returned one frame; `select_table_frames` now blends instead.
+2. **The verdict bar.** A full frame overlap was reported as "variant", so a table that *was* already
+   in the library still looked donatable. Both `docs/wt-hash.js` and `tools/wt_hash.py` now read
+   `overlap >= 0.99` as **identical**, with the note "same table, different frame selection".
+- Verified against the live copies: live `wt-hash.js` + live index + a default (spectral) build of
+  `BassTables 01.wav` → `identical | of: BassTables 01 WT.xrni` → "already in the library".
+- Gotcha: `wt_hash.py --build-index` indexes the **repo's** instruments, so sync the repo *before*
+  re-indexing, or the index describes the previous build (this made a test look inverted).
+
+## Facts worth not rediscovering
+- An instrument chain is a `SampleFilterDeviceChain` and allows **65** device kinds — filters, gainers,
+  LFOs, Hydras, Doofers, sends, and an `InstrumentMacroDevice`. A modulation set
+  (`SampleModulationSet`) allows only **11** `Sample*ModulationDevice` kinds and its targets are
+  Volume/Panning/Pitch/Cutoff/Resonance/Drive — you cannot reach macros from there.
+- The Instrument Macros device is absent from the instrument editor's add-device menu but is legal in
+  the file and Renoise loads, keeps and re-saves it (proven by the hand-wired instrument). Documented
+  in the tools README.
+- Verified parameter indices — instrument context: Hydra input **1**, macros **1-8**, filter cutoff
+  **2**, gainer volume **1**, LFO position/Reset **8**. Track context: device indexing is 1-based
+  (Gainer volume 2, filter cutoff 2), LFO Reset 8.
+- `.xrnt` chain presets are the *track* format only (no Sample devices), so an instrument-side rig
+  ships baked into the `.xrni`, never as a preset.
+- Renoise's own wavetable template LFOs are `preset Init / library Bundled Content / modified true`
+  with the shape inline. Ours match, so nothing depends on a preset the user might not have.
+- The instruments repo's files are **hardlinks** to the library, and the builder copies samples in
+  place, so a rebuild propagates into the repo working tree (git showed a clean tree after a rebuild
+  that changed every file).
+
+## Remaining after this session
+- [ ] **Wrap bug in the sibling session's sparse LFO presets** (commit `726a2e0`). It switched the
+      presets to Vital's authored points with `Curve` interpolation, and the phase fix survived, but
+      `presets/Effect Presets/LFO/Sin.xrdp` now has **two** points: `0,0.0000` and `48,1.0000`. The
+      descending half is gone, so the cycle jumps from the peak straight back to zero — a sawtooth
+      rather than a sine. Vital's Sin has three authored points; the third (`96,0.0`) should be there.
+      Check whether the rotation drops the final point or the wrap duplicate is being removed.
+- [ ] **Reconcile the two converter copies.** `~/Projects/renoise-wavetable-tools/vitallfo_to_xrdp.py`
+      (repo, `726a2e0`, sparse + Curve + tension, **no** `align_to_low`) differs from
+      `~/Projects/renoise/tools/vitallfo_to_xrdp.py` (dense rasterisation + `align_to_low`). The repo's
+      output is what is published, so it is probably canonical — but the working copy's phase fix must
+      not be lost. Same for `vitallfo_to_xrno.py`.
+- [ ] **Source-table key for the duplicate check.** A donor who picks a different frame selection or
+      cycle length still reads "new" (the twelve frames genuinely differ). Indexing one hash of the
+      whole uploaded wavetable, alongside the per-frame keys, would catch any setting; the provenance
+      needed to compute them already exists.
+- [ ] **Decide the baked default shape.** The instruments bake the 16-step triangle; the 133 Vital
+      curves now live beside them as presets. If one should be baked instead, add
+      `--sweep-shape <file.vitallfo|.xrdp>` and rebuild (~35 min, or patch the envelopes in place).
+- [ ] **Listen to it in Renoise.** Nothing in this session was heard: the sweep, the KT reset and the
+      rotated presets are verified structurally and by measurement only.
+- [ ] Instruments repo as independent copies instead of hardlinks, if an in-place edit ever needs to be
+      rolled back cleanly.
+- [ ] Hub facts refresh (`renoise-hub/build.py`, weekly workflow) — the hub lists 2,339 instruments;
+      the local library is 2,319 filed + 16 flat, and `Survey/` (20, pre-rig) is still there.
+- [ ] Kaidiak's three instruments were removed from the repo on purpose (`d5a27bb`) and are now missing
+      locally too; recoverable from git `3966a36` if wanted.
