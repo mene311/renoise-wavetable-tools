@@ -412,3 +412,75 @@ Two faults, both fixed:
       the local library is 2,319 filed + 16 flat, and `Survey/` (20, pre-rig) is still there.
 - [ ] Kaidiak's three instruments were removed from the repo on purpose (`d5a27bb`) and are now missing
       locally too; recoverable from git `3966a36` if wanted.
+
+---
+
+# 2026-09-25 (later) — the tool is installed, and the other tools are published
+
+## The `.xrnx` is installed in Renoise, and finally has a load test
+
+- Installed at
+  `~/.config/Renoise/V3.5.4/Scripts/Tools/com.meneses.WavetableBuilder.xrnx` →
+  symlink to `renoise-tool/`, the same pattern `RenoiseChat` and `YTSampler` use, so
+  editing the repo edits what Renoise loads. Verified byte-identical to the packaged
+  `.xrnx` (`main.lua`, `wtlib.lua`, `zipwriter.lua`, `manifest.xml`).
+- **Two Renoise instances were already running** (one 10h41m, one 27m) and were left
+  alone. The tool appears on the *next* start, or on `Tools → Reload All Tools`. This
+  is still the one thing not proven on this machine: nothing has been run inside a live
+  Renoise, because restarting someone's session to test is not worth it.
+- New `tests/load_test.lua` — the harness that was previously ad-hoc. It stubs the parts
+  of the API the tool touches (`renoise.song/app/tool/ViewBuilder`, with a lazy
+  self-returning stub so deep chains like `song.selected_sample.sample_buffer` resolve),
+  puts the tool dir on `package.path` the way Renoise does, and runs the entry point.
+  Checks: manifest parses and its `<Id>`/`ApiVersion` are right, deps resolve, `wtlib`
+  and `zipwriter` return non-empty tables, and `main.lua` evaluates and runs. **6/6
+  pass** under LuaJIT. Run it from the repo root: `luajit tests/load_test.lua`.
+
+## `renoise-tools` published — the three `.xrnx` tools
+
+New public repo: <https://github.com/mene311/renoise-tools> (local `~/Projects/renoise-tools`).
+
+Scope was set deliberately: **Renoise tools only, not Python, final versions only.** So
+the 50-odd Python scripts in `~/Projects/renoise/tools/` are *not* in it. What is:
+
+| Tool | Version | Was |
+|---|---|---|
+| `com.meneses.PhraseToPattern` | 1.0 | only ever existed in the Renoise config dir — **first copy under version control** |
+| `com.meneses.YTSampler` | 1.00 | `~/Projects/renoise/tools/yt-sampler/`, no repo |
+| `com.meneses.RenoiseChat` | 0.10 | `~/Projects/renoise/chat/`, no repo |
+
+`WavetableBuilder` is *not* duplicated there; the README points at this repo. `RenoiseChat`
+is documented honestly as needing its `brain.mjs` daemon (TCP 127.0.0.1:19715), so the
+`.xrnx` alone is half a tool.
+
+### The archive shape bug — worth remembering
+
+`build.sh` packs each tool dir into `dist/<Id>.xrnx`. **The first version made a zip with
+the `<Id>.xrnx/` directory as the top-level entry, which installs nothing.** The official
+guide (<https://renoise.github.io/xrnx/start/installing.html>) is explicit: *"only zip the
+contents of the folder, not the folder itself"* — `manifest.xml` and `main.lua` must sit at
+the archive root. Fixed, and `build.sh` now asserts `manifest.xml` is at the root and that
+no `preferences.xml` shipped, because this is invisible until someone drags the file in.
+
+- `preferences.xml` is Renoise runtime state written into a tool dir; it is gitignored and
+  excluded from archives. `YTSampler` had one sitting next to `main.lua`; it was dropped.
+- CI green on the first run (run `36144146666`, 23s): lints all three under `luac5.1`
+  (Renoise embeds LuaJIT = 5.1), builds, re-checks the archive shape, uploads the artifact.
+  Downloaded the artifact and re-verified all three unpack with `manifest.xml` at the root,
+  `<Id>` matching the filename, and every `.lua` compiling.
+- `renoise-hub` updated (`data.json` + rebuilt `index.html`, pushed `30138c8`) — the Tools
+  section listed only `renoise-wavetable-tools` before.
+
+### Not done, on purpose / still open
+
+- [ ] **The Python tooling in `~/Projects/renoise/tools/` is still unpublished** (SFZ →
+  `.xrni` conversion, the official-mirror and forum harvesters, the Renoise-format
+  scanners). User scoped it out of this repo. It is 3.0 M and has no git at all.
+- [ ] **The two converter copies are still unreconciled.** `tools/vitallfo_to_xrdp.py` is
+  *newer and a superset* of the repo's: it has the repo's sparse/Curve/rotation path **and**
+  `--dense`/`--no-align`. Every other wavetable tool in `tools/` (`wt_xrni.py`,
+  `wt_catalogue.py`, `build_sweep_chain.py`) is also newer than what is published. The
+  handoff warned the *published* presets came from the repo version, so this is a
+  regenerate-and-compare job, not a copy. Still needs a decision.
+- [ ] The wrap bug in the sparse LFO presets (two points, `0,0.0` and `48,1.0`, descending
+  half missing) is still open, above.
