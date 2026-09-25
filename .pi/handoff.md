@@ -281,3 +281,21 @@ Asked for: the survey set, the dissected instruments and the test builds.
   a Renoise install can be put back from there; the repo copies live on in git history.
 - `tests/browser_check.py` used `Kaidiak` for its batch test and now uses `impulses and clicks`
   (3 instruments, same expected count). 24/24 both locally and against the deployed site.
+
+## 2026-09-25 (later) — seven more out, and the library got filters
+
+- Removed the flat copies whose content is already filed, rigged, under a timbre folder:
+  `Growl Dirty Raw Strings`, `Vital Harmonic Series` (= `Wub Harmonically Interesting`),
+  the three `Vital Basic Shapes` (= `Chords Clean Skank Stabs or Pads 2`), `Vital Classic Fade`
+  (= `Notahorn Ciddy Cute Kick 2`) and `WaveEdit SYNLP155` (= `SYNLP155`). Four were identical
+  audio and three matched 83-100% of frames both ways. 2,346 -> 2,339, and the count without the
+  sweep rig is down to 13. Table is now 2,326 rigged + 13 variants.
+- Local library and repo verified equal again after the removal, and the 34 files moved aside live
+  in `~/Projects/renoise/removed/2026-09-25/` (`same-as-rigged/` for this batch).
+- Library page: a **source** filter beside the category one, both showing counts, a line naming the
+  active filters, a clear button, and the view in the query string so a narrowed list is a link
+  (`?cat=white+noise&src=WaveEdit+Online+%28CC0%29`). `tests/browser_check.py` grew six checks for
+  it and is now **31 checks, green locally and against the deployed site**.
+- Watch out: after an index rebuild, raw serves the old copy for a minute or two, and jsDelivr for
+  much longer, so a check run immediately after can report the previous count. Not a bug in the
+  page; wait and re-run.
