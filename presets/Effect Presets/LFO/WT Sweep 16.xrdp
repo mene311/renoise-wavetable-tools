@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FilterDevicePreset doc_version="0">
+  <DeviceSlot type="LfoDevice">
+    <DestEffect>
+      <Value>-1</Value>
+    </DestEffect>
+    <DestParameter>
+      <Value>-1</Value>
+    </DestParameter>
+    <Amplitude>
+      <Value>1</Value>
+    </Amplitude>
+    <Offset>
+      <Value>0</Value>
+    </Offset>
+    <Frequency>
+      <Value>16</Value>
+    </Frequency>
+    <Type>
+      <Value>4</Value>
+    </Type>
+    <CustomEnvelope>
+      <PlayMode>Lines</PlayMode>
+      <Length>16</Length>
+      <ValueQuantum>0.0</ValueQuantum>
+      <Points>
+        <Point>0,1.0000,0.0</Point>
+        <Point>1,0.8667,0.0</Point>
+        <Point>2,0.7333,0.0</Point>
+        <Point>3,0.6000,0.0</Point>
+        <Point>4,0.4667,0.0</Point>
+        <Point>5,0.3333,0.0</Point>
+        <Point>6,0.2000,0.0</Point>
+        <Point>7,0.0667,0.0</Point>
+        <Point>8,0.0667,0.0</Point>
+        <Point>9,0.2000,0.0</Point>
+        <Point>10,0.3333,0.0</Point>
+        <Point>11,0.4667,0.0</Point>
+        <Point>12,0.6000,0.0</Point>
+        <Point>13,0.7333,0.0</Point>
+        <Point>14,0.8667,0.0</Point>
+        <Point>15,1.0000,0.0</Point>
+      </Points>
+    </CustomEnvelope>
+  </DeviceSlot>
+</FilterDevicePreset>

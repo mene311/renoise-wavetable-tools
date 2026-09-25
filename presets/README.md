@@ -41,3 +41,10 @@ sweep rig, so they're handy on their own if you're building something similar by
 `vitallfo_to_xrdp.py` and `vitallfo_to_xrno.py` in the repository root do the conversion: they
 read Vital's LFO table JSON and emit these files. If you have your own Vital collection, point
 the scripts at it and you'll get your shapes as Renoise presets.
+
+## WT Sweep 16.xrdp
+
+The shape the instruments carry baked in. Drop it on any LFO to get the same curve: a
+triangle up and down over 16 lines, one step per pattern line, unipolar, no destination
+set. The sweep rig in every instrument loads this shape inline, named `SWEEP`, so it never
+depends on this file being present.
