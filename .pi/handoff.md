@@ -257,9 +257,27 @@ hashes of the wavetables.
 ## Remaining after this session
 
 - [ ] The `.xrnx` Renoise tool has still never been run inside Renoise, only under a stubbed API.
-- [ ] 31 instruments in the repo have no `provenance.tsv` row (27 flat variants plus four whose
-      names carry a double space); the library browser keys off provenance, so it skips them.
+- [ ] 27 instruments in the repo have no `provenance.tsv` row (23 flat variants plus four whose
+      names differ slightly from their row); the library browser keys off provenance, so it skips
+      them. An earlier note said 31, before the survey/Kaidiak/test files were removed.
 - [ ] Optional: prune the 47 without the sweep rig, or recluster with other k.
 - [ ] Optional: decide whether the hub moves to the bare `mene311.github.io` root.
 - [ ] Review `donations/review/` when the first variant arrives; the 80% threshold is a guess that
       has only been exercised against synthetic cases.
+
+## 2026-09-25 — 27 instruments removed from the library
+
+Asked for: the survey set, the dissected instruments and the test builds.
+
+- Gone: `Survey/` (20, a cross-pack sample whose source tables are published under their own
+  names), `Kaidiak/` (3, third-party `.xrni` kept to dissect the format), and the four `TEST *`
+  builds. 2,373 -> 2,346 instruments.
+- None carried the sweep rig, so 2,326 rigged is unchanged and the count without it drops from 47
+  to 20 (the growl/bass tuning registers and a few early single-table builds).
+- `provenance.tsv`, `provenance.json` and `catalogue.tsv` each lost their 23 rows and `hashes/`
+  was rebuilt; all three files now hold 2,319 rows and agree. README counts updated, and the hub's
+  prose count with them.
+- The local library copies were moved to `~/Projects/renoise/removed/2026-09-25/`, not deleted, so
+  a Renoise install can be put back from there; the repo copies live on in git history.
+- `tests/browser_check.py` used `Kaidiak` for its batch test and now uses `impulses and clicks`
+  (3 instruments, same expected count). 24/24 both locally and against the deployed site.
