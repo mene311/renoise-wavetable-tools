@@ -178,6 +178,56 @@ def test_library(page, base: str, errors: list[str]) -> None:
     check(status.startswith("wrote"), "batch zip built in the browser", status[:90])
 
 
+def test_filters(page, base: str, errors: list[str]) -> None:
+    """Filtering by source and category, and the fact that a filtered list is a link."""
+    import re
+
+    page.goto(f"{base}/library.html", wait_until="load")
+    page.wait_for_selector("tr[data-n]", timeout=40000)
+    everything = int(re.match(r"(\d+)", page.inner_text("#count")).group(1))
+
+    options = page.eval_on_selector_all(
+        "#src option", "els => els.map(o => [o.value, o.textContent])")
+    source = next(o for o in options if o[0])
+    page.select_option("#src", source[0])
+    page.wait_for_timeout(300)
+    shown = int(re.match(r"(\d+)", page.inner_text("#count")).group(1))
+    claimed = int(re.search(r"\((\d+)\)$", source[1]).group(1))
+    check(shown == claimed, "source filter agrees with its own count",
+          f"{source[0]}: {shown} shown, option says {claimed}")
+    check(source[0] in page.inner_text("#filterNote"), "the filter is spelled out",
+          page.inner_text("#filterNote").strip()[:70])
+
+    categories = [o[0] for o in page.eval_on_selector_all(
+        "#cat option", "els => els.map(o => [o.value, o.textContent])") if o[0]]
+    category = categories[0]
+    page.select_option("#cat", category)
+    page.wait_for_timeout(300)
+    combined = int(re.match(r"(\d+)", page.inner_text("#count")).group(1))
+    check(combined < shown or shown == 0, "category narrows a source further",
+          f"{category} + {source[0]}: {combined} of {shown}")
+
+    tags = set(page.eval_on_selector_all("tr[data-n] td:nth-child(3) .tag",
+                                        "els => els.map(e => e.textContent)"))
+    check(tags == {category}, "every row shown is the filtered category", ", ".join(sorted(tags)))
+
+    link = page.url
+    check("cat=" in link and "src=" in link, "the filtered view is a link",
+          link.split("?", 1)[-1][:70])
+    page.goto(link, wait_until="load")
+    page.wait_for_selector("tr[data-n]", timeout=40000)
+    restored = (page.input_value("#cat"), page.input_value("#src"),
+                int(re.match(r"(\d+)", page.inner_text("#count")).group(1)))
+    check(restored == (category, source[0], combined), "the link restores the same view",
+          f"{restored[0]} + {restored[1]} = {restored[2]}")
+
+    page.click("#clearFilters")
+    page.wait_for_timeout(300)
+    back = int(re.match(r"(\d+)", page.inner_text("#count")).group(1))
+    check(back == everything > combined, "clearing goes back to everything",
+          f"{back} of {everything}, was {combined}")
+
+
 def test_donate(page, base: str, errors: list[str]) -> None:
     """The duplicate check, and the zip it hands to the repository."""
     page.goto(f"{base}/index.html", wait_until="load")
@@ -309,6 +359,7 @@ def main() -> int:
         try:
             test_builder(page, base, errors)
             test_library(page, base, errors)
+            test_filters(page, base, errors)
             test_donate(page, base, errors)
             test_selftest(page, base)
         finally:

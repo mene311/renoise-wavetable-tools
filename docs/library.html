@@ -26,6 +26,7 @@ fetched and drawn, or take a whole category as a zip.</p>
     <div class="opts">
       <label>Search <input type="text" id="q" placeholder="name or source table" size="22"></label>
       <label>Category <select id="cat"><option value="">all</option></select></label>
+      <label>Source <select id="src"><option value="">all</option></select></label>
       <label>Sort
         <select id="sort">
           <option value="name">name</option>
@@ -41,11 +42,13 @@ fetched and drawn, or take a whole category as a zip.</p>
       </label>
     </div>
     <div class="opts">
+      <button id="clearFilters" class="secondary">Clear filters</button>
       <button id="selectAll" class="secondary">Select all shown</button>
       <button id="clearSel" class="secondary">Clear selection</button>
       <button id="batch" disabled>Download selected (.zip)</button>
       <span id="selCount" class="dim">nothing selected</span>
     </div>
+    <div class="note" id="filterNote"></div>
     <div class="note" id="status">
       Macro 1 (<strong>WT Position</strong>) walks the table in every one of these. A batch is
       fetched file by file and zipped in this page, so a few hundred instruments take a moment.
@@ -156,13 +159,24 @@ async function load() {
       slope: f.slope !== undefined ? Number(f.slope) : NaN,
     };
   }).filter((r) => r.instrument && r.instrument.endsWith(".xrni"));
-  const counts = new Map();
-  for (const i of items) counts.set(i.category, (counts.get(i.category) || 0) + 1);
+  const counts = new Map(), sources = new Map();
+  for (const i of items) {
+    counts.set(i.category, (counts.get(i.category) || 0) + 1);
+    const src = i.collection || "unrecorded";
+    sources.set(src, (sources.get(src) || 0) + 1);
+  }
   const sel = document.getElementById("cat");
   for (const c of [...counts.keys()].sort()) {
     sel.insertAdjacentHTML("beforeend",
-      "<option value=\"" + c + "\">" + c + " (" + counts.get(c) + ")</option>");
+      "<option value=\"" + esc(c) + "\">" + esc(c) + " (" + counts.get(c) + ")</option>");
   }
+  const srcSel = document.getElementById("src");
+  const biggest = [...sources.entries()].sort((a, b) => b[1] - a[1]);
+  for (const [src, n] of biggest) {
+    srcSel.insertAdjacentHTML("beforeend",
+      "<option value=\"" + esc(src) + "\">" + esc(src) + " (" + n + ")</option>");
+  }
+  readUrl();
   render();
 }
 
@@ -171,9 +185,11 @@ function shortName(i) { return i.instrument.replace(/\.xrni$/, ""); }
 function applyFilters() {
   const q = document.getElementById("q").value.trim().toLowerCase();
   const cat = document.getElementById("cat").value;
+  const src = document.getElementById("src").value;
   const sort = document.getElementById("sort").value;
   filtered = items.filter((i) =>
     (!cat || i.category === cat) &&
+    (!src || (i.collection || "unrecorded") === src) &&
     (!q || (i.instrument + " " + i.source + " " + i.collection).toLowerCase().includes(q)));
   filtered.sort((a, b) => sort === "bright" ? (b.bright - a.bright)
     : sort === "category" ? (a.category.localeCompare(b.category) || a.instrument.localeCompare(b.instrument))
@@ -184,6 +200,17 @@ function render() {
   applyFilters();
   document.getElementById("count").textContent =
     filtered.length + " of " + items.length + " instruments";
+  const cat = document.getElementById("cat").value;
+  const src = document.getElementById("src").value;
+  const bits = [];
+  if (cat) bits.push("category: " + cat);
+  if (src) bits.push("source: " + src);
+  const q = document.getElementById("q").value.trim();
+  if (q) bits.push("matching \"" + q + "\"");
+  document.getElementById("filterNote").textContent = bits.length
+    ? bits.join(" · ") + " — " + filtered.length + " instrument" + (filtered.length === 1 ? "" : "s")
+    : "";
+  writeUrl();
   document.getElementById("shown").textContent =
     filtered.length === items.length ? "" : filtered.length + " shown";
   const byCat = document.getElementById("view").value === "category";
@@ -280,6 +307,33 @@ function updateSelectionUi() {
   document.getElementById("selCount").textContent =
     n === 0 ? "nothing selected" : n + " selected";
   document.getElementById("batch").disabled = n === 0 || busy;
+}
+
+// A filtered list is worth being able to link to, so the view lives in the query string.
+function writeUrl() {
+  const params = new URLSearchParams();
+  const q = document.getElementById("q").value.trim();
+  const cat = document.getElementById("cat").value;
+  const src = document.getElementById("src").value;
+  const view = document.getElementById("view").value;
+  if (q) params.set("q", q);
+  if (cat) params.set("cat", cat);
+  if (src) params.set("src", src);
+  if (view !== "table") params.set("view", view);
+  const url = location.pathname + (params.toString() ? "?" + params.toString() : "");
+  history.replaceState(null, "", url);
+}
+
+function readUrl() {
+  const params = new URLSearchParams(location.search);
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (value && [...el.options].some((o) => o.value === value)) el.value = value;
+  };
+  if (params.get("q")) document.getElementById("q").value = params.get("q");
+  set("cat", params.get("cat"));
+  set("src", params.get("src"));
+  set("view", params.get("view"));
 }
 
 function esc(s) {
@@ -421,8 +475,15 @@ async function batchDownload(list, label) {
 
 // ── wiring ─────────────────────────────────────────────────────────────────
 
-["q", "cat", "sort", "view"].forEach((id) =>
+["q", "cat", "src", "sort", "view"].forEach((id) =>
   document.getElementById(id).addEventListener("input", render));
+
+document.getElementById("clearFilters").addEventListener("click", () => {
+  document.getElementById("q").value = "";
+  document.getElementById("cat").value = "";
+  document.getElementById("src").value = "";
+  render();
+});
 
 document.getElementById("headCheck").addEventListener("change", (ev) => {
   filtered.forEach((i) => ev.target.checked ? selected.add(i.instrument) : selected.delete(i.instrument));

@@ -155,7 +155,9 @@ a zip of them, asks how many frames you want, and hands back instruments you can
 a time or all at once. Nothing is uploaded.
 
 Next to it, the library page browses everything that has been published, searchable by name or by
-the table it came from, and with a by category view that shows what each timbre folder holds.
+the table it came from, filterable by timbre category and by source collection (both carry their
+counts), and with a by category view that shows what each timbre folder holds. A filtered view
+lives in the URL, so a narrowed list can be linked or bookmarked.
 Clicking a row fetches that instrument and draws its first frame, reading the sample whether
 Renoise stored it as wav or, as it does on save, as flac.
 
