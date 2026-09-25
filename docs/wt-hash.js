@@ -198,7 +198,15 @@
     }
     if (!best) return { verdict: "new", overlap: 0, mine: desc.keys.length };
     best.mine = desc.keys.length;
-    best.verdict = best.overlap >= 0.8 ? "variant" : "new";
+    // Every frame of the candidate has a counterpart in that instrument, so it is the same
+    // table: only the frame selection or the cycle length differs. Reporting that as a
+    // "variant" told people to donate a table the library already had.
+    if (best.overlap >= 0.99) {
+      best.verdict = "identical";
+      best.note = "same table, different frame selection";
+    } else {
+      best.verdict = best.overlap >= 0.8 ? "variant" : "new";
+    }
     return best;
   }
 

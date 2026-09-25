@@ -296,7 +296,7 @@ const esc = (s) => String(s === undefined ? "" : s)
 function verdictCell(match) {
   if (match.verdict === "identical")
     return "<span class='warn'>already in the library</span> <span class='dim'>as " +
-      esc(match.of) + "</span>";
+      esc(match.of) + (match.note ? " (" + esc(match.note) + ")" : "") + "</span>";
   if (match.verdict === "variant")
     return "<span class='warn'>looks like a variant</span> <span class='dim'>of " + esc(match.of) +
       ", " + match.matched + " of " + match.mine + " frames match</span>";
