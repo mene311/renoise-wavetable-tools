@@ -180,6 +180,31 @@ python tests/browser_check.py --url https://mene311.github.io/renoise-wavetable-
 `docs/selftest.html` is the lighter version, for anyone wondering whether their browser can reach
 the repository at all.
 
+## Giving one back
+
+The builder page has a fourth panel for this. When a build finishes it hashes the frames and
+compares them against `hashes/index.json` in the instrument repository, which holds both hashes for
+every instrument already published, and says whether what you made is already there, close to
+something that is, or new. Tick what to send, say how to be credited, and it hands back one zip
+holding the instruments plus a `donation.json` describing them. The upload page for `donations/` is
+one click from there, and the repository does the filing.
+
+Two hashes, because file bytes say nothing here: Renoise stores the samples as flac when it saves
+and this page writes wav, so the same table differs byte for byte. An exact key over the samples
+catches the same audio either way. A shape key, the cycle read at 24 points, catches the same table
+rebuilt at another cycle length, which is the case that matters most, since hardly anyone rebuilds
+with the same settings twice.
+
+On arrival, `tools/ingest_donations.py` in the instrument repository checks again. Identical audio
+is refused and named, a variant is held next to it for a look rather than filed, and anything new
+goes into `instruments/<category>/` with a provenance row and a rebuilt index. Every processed zip
+is kept under `accepted/` or `rejected/` with a report saying what was decided. To ask the same
+question from a terminal, with the instrument repository checked out:
+
+```sh
+python3 tools/wt_hash.py --check ../some-instrument.xrni
+```
+
 ## One caveat
 
 Some instruments play at a different pitch than the key you press. When the loudest part of
