@@ -484,3 +484,53 @@ no `preferences.xml` shipped, because this is invisible until someone drags the 
   regenerate-and-compare job, not a copy. Still needs a decision.
 - [ ] The wrap bug in the sparse LFO presets (two points, `0,0.0` and `48,1.0`, descending
   half missing) is still open, above.
+
+---
+
+# 2026-09-25 (even later) — the tools are one repo each, because the hub works that way
+
+Correction to the section above: the single `renoise-tools` repo holding all three tools
+**was the wrong shape**, and it is archived. `renoise-hub/build.py` renders **one card per
+repository** — it reads `data.json`, calls the GitHub API per repo name, counts files by
+extension via `tree_count`, and links into the repo. Three tools nested under
+`renoise-tools/com.meneses.X.xrnx/` therefore showed up as *one* card with no facts and no
+way to point at a single tool. Each tool needs its own repo.
+
+## Now: one repo per tool, repo root = the tool's contents
+
+| Repo | Tool | Tag |
+|---|---|---|
+| `renoise-phrasetopattern` | `com.meneses.PhraseToPattern` 1.0 | `v1.0` |
+| `renoise-ytsampler` | `com.meneses.YTSampler` 1.00 | `v1.00` |
+| `renoise-chat` | `com.meneses.RenoiseChat` 0.10 | `v0.10` (pre-release) |
+
+The repo root holds `manifest.xml`, `main.lua` and friends **directly** — not wrapped in a
+`<Id>.xrnx/` folder. That is the Renoise convention (`.xrnx` folder = repo root of the
+tool) and it makes a checkout usable as-is:
+
+```bash
+ln -s "$PWD" ~/.config/Renoise/V3.5.4/Scripts/Tools/com.meneses.PhraseToPattern.xrnx
+```
+
+Each repo has `build.sh` (lint + assert the archive shape), a `build` workflow, an MIT
+licence, a README, and a release with the installable `.xrnx` attached. **CI green on all
+three, first run.** Verified by downloading every release asset and unzipping it:
+manifest at the archive root, `<Id>` matching the filename, `main.lua` compiling.
+
+- Hub updated (`data.json`, `build.py`, `index.html`, commits `1a92b42` + `0c13da5`).
+  The Tools section is now four cards: wavetable builder + the three tools.
+- `build.py` gained an optional `link_labels` map. The tools link to a **release page**
+  (an installable `.xrnx`), so "download .zip" was wrong for them — but it is still right
+  for the instrument libraries, whose link genuinely is a zip. Per-entry override, no
+  global change.
+- **`renoise-tools` is archived**, not deleted: deleting needs the `delete_repo` token
+  scope, which this `gh` token does not have. Its description now says SUPERSEDED. If you
+  want it gone: `gh auth refresh -h github.com -s delete_repo && gh repo delete mene311/renoise-tools --yes`.
+- Local `~/Projects/renoise-tools/` is now redundant; the three source dirs live at
+  `~/Projects/renoise-{phrasetopattern,ytsampler,chat}/`.
+
+## Lesson
+
+The hub is the index, so **it dictates the shape**: one repo per thing, flat, with the
+counts coming from a tree walk. Anything grouped into a container repo is invisible to it.
+Check `build.py` before choosing a repo layout for anything meant to appear on the hub.
