@@ -148,10 +148,14 @@
         let lastError;
         for (const base of INDEX_BASES) {
           try {
-            // raw caches for minutes and jsDelivr for much longer, so ask once a day under a
-            // name the cache has not seen. The index changes when a donation lands.
+            // Ask under a name the cache has not seen, to the hour: the index is rewritten
+            // whenever a donation lands, and a daily key meant a second rewrite in the same day
+            // reused the first one's copy. This defeats the browser cache; raw's edge nodes still
+            // hold a copy for a minute or two after a push, which is why the count a donation
+            // check reports can lag the repository briefly. The repository checks again on
+            // arrival, so a stale index here can only mean a wasted upload, never a bad file.
             const bust = base.indexOf("raw.githubusercontent") >= 0
-              ? "?v=" + new Date().toISOString().slice(0, 10) : "";
+              ? "?v=" + new Date().toISOString().slice(0, 13) : "";
             const r = await fetch(base + "index.json" + bust);
             if (!r.ok) throw new Error("HTTP " + r.status);
             const doc = await r.json();
