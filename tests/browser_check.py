@@ -161,7 +161,7 @@ def test_library(page, base: str, errors: list[str]) -> None:
 
     page.select_option("#view", "category")
     page.wait_for_selector("[data-batch-cat]", timeout=20000)
-    page.select_option("#cat", "Kaidiak")
+    page.select_option("#cat", "impulses and clicks")
     page.wait_for_function(
         "() => [...document.querySelectorAll('[data-batch-cat]')].some(b => b.textContent.includes('3'))",
         timeout=20000,
