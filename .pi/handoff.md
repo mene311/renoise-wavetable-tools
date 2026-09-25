@@ -186,11 +186,13 @@ params 1-8, filter cutoff 2, gainer volume 1, LFO position/Reset 8.
 
 ```
 cd ~/Projects/renoise-wavetable-tools
-git log --oneline | head            # last: 0b38b10 + the site/batch commit
-# refresh the instruments repo (the outstanding job):
-python3 ~/Projects/renoise/tools/wt_catalogue.py --scan            # writes the TSV mapping
-# then copy the library's category folders over the repo's, commit, push
+git log --oneline | head            # site, tool, presets, hub
 ```
+
+The instruments refresh used to be listed here as the outstanding job. It is done: `7f7850a` and
+later carry it, and on 2026-09-25 all 2,373 local instruments were compared against the published
+ones — same names, identical `Instrument.xml` by sha256, identical frame content. Nothing is behind
+on either side, so do not re-copy the library over the repo unless the library actually changed.
 
 To rebuild anything from scratch: `wt_catalogue.py --scan --build --with-sweep` (~35 min, 2,319
 instruments, 0.87 s each). Verify any instrument with
@@ -216,3 +218,48 @@ Reported from the phone: clicking a wavetable in the library browser gave
 - New test: `tests/browser_check.py` (playwright drives /usr/bin/chromium). 15 checks, runs local
   and against the deployed URL, fails on console errors. Verified 15/15 both ways.
   Needs a venv with playwright: `~/.local/venvs/browser/bin/python tests/browser_check.py`.
+
+## 2026-09-25 — donating an instrument, and the duplicate check
+
+The ask: let someone who builds a table offer it to the library, catching duplicates first, with
+hashes of the wavetables.
+
+- **Hashes of the frames, not the file.** Renoise stores sample data as flac on save and the
+  builder writes wav, so the same table differs byte for byte. `tools/wt_hash.py` (in the
+  instruments repo) decodes and hashes twice: an exact key over the samples, and a shape key, the
+  cycle read at 24 points and quantised to 8 bit, which survives another cycle length or another
+  rendering. `hashes/index.json` holds both for all 2,373 instruments (1.1 MB, ~620 KB gzipped).
+- **`docs/wt-hash.js`** mirrors it, and `wt-hash.js` also owns `decodeSample`, used by the library
+  view, the smoke test and the builder. `tests/browser_check.py` asserts the JS key equals the key
+  in the Python-built index, which is the guard against the two drifting.
+- **Two decoder traps, both found by that test.** Chromium resamples to the audio device rate
+  unless told otherwise: a 169 sample cycle came back as 183, so every hash disagreed. Decode with
+  an `OfflineAudioContext` at the rate parsed out of the flac streaminfo or the wav fmt chunk.
+  And libsndfile and Chromium disagree in the last bits of a float sample, which at 16 bit lands
+  either side of a rounding boundary, so the exact key quantises to 11 bit instead.
+- **The builder's fourth panel**: after a build it hashes what it made, compares against the index
+  (raw first with a daily cache-busting query, jsDelivr as fallback) and shows *already in the
+  library* / *looks like a variant* / *new*. Tick, credit yourself, get one zip with the
+  instruments plus `donation.json`, then the `donations/` upload page.
+- **`tools/ingest_donations.py`** + `.github/workflows/ingest-donations.yml` in the instruments
+  repo: identical audio refused and named, a variant (80% of frames matching) held in
+  `donations/review/`, anything new filed into `instruments/<category>/` with a provenance row and
+  a rebuilt index. Zips kept under `accepted/` or `rejected/`, decisions written to `REPORT.md`.
+- Tested: ingest on a throwaway copy (duplicate under a new name refused, a fresh table accepted
+  and indexed, a broken zip reported, and re-donating the accepted file refused on the second
+  pass), and `tests/browser_check.py` at 24/24 both locally and against the deployed site.
+- Gotcha: the workflow's first run committed a `__pycache__` because it staged everything. It now
+  stages `instruments hashes provenance.tsv donations .gitignore`.
+- Gotcha: `raw.githubusercontent.com` serves a stale copy for a few minutes after a push
+  (jsDelivr for much longer), so a check run straight after pushing a rebuilt index can fail on
+  the old one. Wait, or re-run.
+
+## Remaining after this session
+
+- [ ] The `.xrnx` Renoise tool has still never been run inside Renoise, only under a stubbed API.
+- [ ] 31 instruments in the repo have no `provenance.tsv` row (27 flat variants plus four whose
+      names carry a double space); the library browser keys off provenance, so it skips them.
+- [ ] Optional: prune the 47 without the sweep rig, or recluster with other k.
+- [ ] Optional: decide whether the hub moves to the bare `mene311.github.io` root.
+- [ ] Review `donations/review/` when the first variant arrives; the 80% threshold is a guess that
+      has only been exercised against synthetic cases.
