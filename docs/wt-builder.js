@@ -664,6 +664,7 @@
 
     return {
       xrni: zipStore(entries), xml,
+      frames: resampled,                      // the page hashes these for the duplicate check
       previewCycle: Array.from(resampled[0]),
       report: {
         source: opts.filename, kind: source.kind,

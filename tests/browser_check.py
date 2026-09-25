@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import json
 import http.server
 import socketserver
 import sys
@@ -22,6 +23,12 @@ import threading
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+FRAME_FLOATS = '''
+async function frameFloats(bytes) {
+  return Array.from((await WTHash.decodeSample(bytes)).samples);
+}
+'''
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 results: list[tuple[bool, str, str]] = []
@@ -112,16 +119,7 @@ def test_builder(page, base: str, errors: list[str]) -> None:
              const xml = new TextDecoder().decode(files.get("Instrument.xml") || new Uint8Array());
              const first = frames[0] ? files.get(frames[0]) : null;
              let drawn = 0;
-             if (first) {
-               drawn = (first[0] === 0x52)
-                 ? WT.parseWav(first).samples.length
-                 : (await (async () => {
-                     const ctx = new AudioContext();
-                     const buf = await ctx.decodeAudioData(first.buffer.slice(0));
-                     ctx.close();
-                     return buf.length;
-                   })());
-             }
+             if (first) drawn = (await WTHash.decodeSample(first)).samples.length;
              return { frames: frames.length, macro: /WT Position/.test(xml),
                       sweep: /CustomDeviceName>SWEEP</.test(xml), drawn, size: bytes.length };
            }""",
@@ -180,6 +178,91 @@ def test_library(page, base: str, errors: list[str]) -> None:
     check(status.startswith("wrote"), "batch zip built in the browser", status[:90])
 
 
+def test_donate(page, base: str, errors: list[str]) -> None:
+    """The duplicate check, and the zip it hands to the repository."""
+    page.goto(f"{base}/index.html", wait_until="load")
+    page.evaluate(
+        """(bytes) => {
+             const dt = new DataTransfer();
+             dt.items.add(new File([new Uint8Array(bytes)], "donation probe.wav", {type: "audio/wav"}));
+             const input = document.getElementById("files");
+             input.files = dt.files;
+             input.dispatchEvent(new Event("change"));
+           }""",
+        page.evaluate("(" + MAKE_WAV + ")(12, 2048, 44100)"),
+    )
+    page.wait_for_function(
+        "() => document.getElementById('fileinfo').textContent.includes('donation probe.wav')",
+        timeout=20000,
+    )
+    page.click("#build")
+    page.wait_for_selector("#results tr", timeout=60000)
+    page.wait_for_selector("#donateRows tr", timeout=120000)
+    verdict = page.inner_text("#donateRows tr")
+    check("donate panel checks what you built", "library" in verdict or "new" in verdict,
+          verdict.replace("\n", " ")[:90])
+
+    # the page's hashing against the index the repository generated with python
+    agreement = page.evaluate(
+        """async () => {
+             async function frameFloats(bytes) {
+               return Array.from((await WTHash.decodeSample(bytes)).samples);
+             }
+             const index = await WTHash.loadIndex();
+             const entry = index.instruments.find((i) => i.name === "Dub Siren Accurater WT.xrni");
+             const base = "https://raw.githubusercontent.com/mene311/renoise-wavetable-instruments/master/";
+             const path = "instruments/" + encodeURIComponent(entry.category) + "/" + encodeURIComponent(entry.name);
+             const bytes = new Uint8Array(await (await fetch(base + path)).arrayBuffer());
+             const files = new Map((await WT.listZip(bytes)).map((e) => [e.name, e.data]));
+             const names = [...files.keys()].filter((k) => k.startsWith("SampleData/")).sort();
+             const frames = [];
+             for (const n of names) frames.push(await frameFloats(files.get(n)));
+             const desc = WTHash.descriptor(frames);
+             const shapes = atob(entry.shapes).split("").map((c) => c.charCodeAt(0));
+             const mineFirst = Array.from(desc.keys[0]);
+             const theirsFirst = shapes.slice(0, desc.keys[0].length);
+             const sameShape = mineFirst.every((v, i) => v === theirsFirst[i]);
+             const match = WTHash.compare(index, desc);
+             // nudge one frame: a rebuild with other settings should read as a variant, not as new
+             const wobbled = frames.map((f, i) => i === 0 ? f.map((v) => v * 0.98 + 0.01) : f);
+             const nearby = WTHash.compare(index, WTHash.descriptor(wobbled));
+             const rng = (() => { let s = 7; return () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648; })();
+             const noise = [[...new Float32Array(169)].map(() => rng() * 2 - 1)];
+             const fresh = WTHash.compare(index, WTHash.descriptor(noise));
+             return { count: index.count, points: index.points, entryKey: entry.key, myKey: desc.key,
+                      sameShape, verdict: match.verdict, of: match.of, overlap: match.overlap,
+                      nearby: nearby.verdict, fresh: fresh.verdict, frames: frames.length };
+           }"""
+    )
+    check(agreement["myKey"] == agreement["entryKey"], "js and python agree on the exact key",
+          f"{agreement['myKey']} vs {agreement['entryKey']}")
+    check(agreement["sameShape"], "js and python agree on the shape key",
+          f"{agreement['points']}-point shapes over {agreement['frames']} frames")
+    check(agreement["verdict"] == "identical" and agreement["of"] == "Dub Siren Accurater WT.xrni",
+          "a published instrument reads as already in the library",
+          f"{agreement['verdict']} to {agreement['of']}, overlap {agreement['overlap']}, "
+          f"index holds {agreement['count']}")
+    check(agreement["nearby"] == "variant", "a nudged copy reads as a variant", agreement["nearby"])
+    check(agreement["fresh"] == "new", "noise reads as new", agreement["fresh"])
+
+    page.check("#consent")
+    page.click("#donate")
+    with page.expect_download(timeout=60000) as download:
+        pass
+    path = download.value.path()
+    check(download.value.suggested_filename.endswith(".zip") and path is not None,
+          "donation zip downloads", download.value.suggested_filename)
+    import zipfile
+
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        manifest = json.loads(z.read("donation.json")) if "donation.json" in names else {}
+    check(any(n.endswith(".xrni") for n in names), "zip holds the instrument", ", ".join(names)[:80])
+    check(manifest.get("instruments") and manifest["instruments"][0].get("key"),
+          "manifest describes it",
+          f"donor={manifest.get('donor')} key={manifest['instruments'][0].get('key') if manifest.get('instruments') else '-'}")
+
+
 def test_selftest(page, base: str) -> None:
     page.goto(f"{base}/selftest.html", wait_until="load")
     page.wait_for_function("() => document.title.startsWith('SMOKE')", timeout=90000)
@@ -213,7 +296,8 @@ def main() -> int:
             executable_path=str(system) if system.exists() else None,
             args=["--no-sandbox"],
         )
-        page = browser.new_page(viewport={"width": 1400, "height": 1000})
+        page = browser.new_page(viewport={"width": 1400, "height": 1000},
+                                accept_downloads=True)
         def note(msg):
             text = msg.text
             if "favicon" in text or "404" in text:   # missing favicon is not an app fault
@@ -225,6 +309,7 @@ def main() -> int:
         try:
             test_builder(page, base, errors)
             test_library(page, base, errors)
+            test_donate(page, base, errors)
             test_selftest(page, base)
         finally:
             browser.close()

@@ -13,6 +13,7 @@
 <p id="summary">running…</p>
 <pre id="out"></pre>
 <script src="wt-builder.js"></script>
+<script src="wt-hash.js"></script>
 <script>
 const WT = WTBuilder;
 // Exercises the paths the library page depends on, against the live repository, so a broken
@@ -73,20 +74,9 @@ async function run() {
       log(files.has("Instrument.xml"), "instrument.xml inside", entries.length + " entries");
       log(frames.length > 0, "sample frames inside", frames.length + " frames");
       if (frames.length) {
-        const raw = files.get(frames[0]);
-        const isWav = raw[0] === 0x52 && raw[1] === 0x49;
-        let count = 0;
-        if (isWav) {
-          count = WT.parseWav(raw).samples.length;
-        } else {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          const buf = await ctx.decodeAudioData(
-            raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
-          count = buf.length;
-          ctx.close();
-        }
-        log(count > 100, "first frame decodes (" + (isWav ? "wav" : "flac") + ")",
-          count + " samples");
+        const got = await WTHash.decodeSample(files.get(frames[0]));
+        log(got.samples.length > 100, "first frame decodes (" + got.format + ")",
+          got.samples.length + " samples at " + got.rate + " Hz");
       }
     } catch (e) { log(false, "instrument parses", e.message); }
   }

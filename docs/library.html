@@ -84,6 +84,7 @@ fetched and drawn, or take a whole category as a zip.</p>
   <a href="https://github.com/mene311/renoise-wavetable-instruments">repository</a>
 </footer>
 <script src="wt-builder.js"></script>
+<script src="wt-hash.js"></script>
 <script>
 // wt-builder.js publishes its API as WTBuilder; these pages use the short name.
 const WT = WTBuilder;
@@ -344,24 +345,12 @@ function drawCycle(cycle) {
   ctx.stroke();
 }
 
-// Renoise keeps sample data as FLAC inside the .xrni (it compresses on save), and the
-// files it never re-saved are plain wav. Browsers decode FLAC themselves, so both work.
+// Renoise keeps sample data as FLAC inside the .xrni (it compresses on save), and the files
+// it never re-saved are plain wav. WTHash.decodeSample reads either, at the file's own sample
+// rate, which is what keeps its hashes identical to the ones the repository computed.
 async function sampleFloats(bytes) {
-  if (bytes[0] === 0x52 && bytes[1] === 0x49) {
-    const wav = WT.parseWav(bytes);
-    return { samples: wav.samples, format: "wav" };
-  }
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  try {
-    const buf = await ctx.decodeAudioData(
-      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    const samples = new Float32Array(buf.length);
-    if (buf.copyFromChannel) buf.copyFromChannel(samples, 0);
-    else samples.set(buf.getChannelData(0));
-    return { samples, format: "flac" };
-  } finally {
-    ctx.close();
-  }
+  const got = await WTHash.decodeSample(bytes);
+  return { samples: got.samples, format: got.format };
 }
 
 async function mapLimit(list, limit, fn) {

@@ -86,6 +86,38 @@
   </div>
 </div>
 
+
+<div class="panel" id="donatePanel" style="display:none">
+  <div class="panel-head"><h2>4 &middot; Give it to the library</h2><span class="hint" id="donateHint"></span></div>
+  <div class="panel-body">
+    <div class="note" id="donateStatus"></div>
+    <table class="rows" id="donateTable">
+      <thead><tr>
+        <th style="width:26px"></th><th>Instrument</th><th>In the library?</th><th class="num">Frames</th>
+      </tr></thead>
+      <tbody id="donateRows"></tbody>
+    </table>
+    <div class="opts" style="margin-top:12px">
+      <label>Credit me as <input type="text" id="donor" size="18" placeholder="name or handle"></label>
+      <label>Category <select id="donateCat"></select></label>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="consent"> this is mine to share, under the same terms as the rest of the library</label>
+    </div>
+    <div class="opts">
+      <button id="donate" disabled>Prepare donation (.zip)</button>
+      <button id="uploadPage" class="secondary" disabled>Open the upload page</button>
+      <span id="donateNote" class="dim"></span>
+    </div>
+    <div class="note">
+      The zip holds the instruments plus a <code>donation.json</code> describing them. Drop it on
+      the upload page and the repository files what is new, checks the hashes again on arrival,
+      and reports anything that was already there. Variants are held for review rather than
+      filed, so a table built with different settings does not slip in as a second copy.
+    </div>
+  </div>
+</div>
+
 <div class="panel">
   <div class="panel-head"><h2>What you get</h2></div>
   <div class="panel-body">
@@ -105,6 +137,7 @@
   <a href="https://github.com/mene311/renoise-wavetable-instruments">instrument library</a>
 </footer>
 <script src="wt-builder.js"></script>
+<script src="wt-hash.js"></script>
 <script>
 const WT = window.WTBuilder;
 const drop = document.getElementById("drop");
@@ -211,7 +244,7 @@ document.getElementById("build").addEventListener("click", async () => {
       const blob = new Blob([out.xrni], { type: "application/zip" });
       const url = URL.createObjectURL(blob);
       const name = base + suffix + ".xrni";
-      results.push({ name, blob, url, report: out.report });
+      results.push({ name, blob, url, report: out.report, samples: out.frames });
       const r = out.report;
       const row = document.createElement("tr");
       row.innerHTML = "<td>" + name + "</td><td class='dim'>" + job.name +
@@ -234,6 +267,7 @@ document.getElementById("build").addEventListener("click", async () => {
     : "";
   status.textContent = "built " + results.length + " of " + jobs.length;
   document.getElementById("downloadAll").disabled = results.length === 0;
+  checkAgainstLibrary();
 });
 
 document.getElementById("downloadAll").addEventListener("click", () => {
@@ -245,6 +279,152 @@ document.getElementById("downloadAll").addEventListener("click", () => {
     const a = document.createElement("a");
     a.href = url; a.download = "wavetable-instruments.zip"; a.click();
   });
+});
+
+// ── giving a table back to the library ──────────────────────────────────────
+// The check runs against hashes/index.json in the instrument repository: the same shape keys
+// the repository computed for everything already published, so a table that is in there under
+// another name still reads as a duplicate.
+const UPLOAD_URL =
+  "https://github.com/mene311/renoise-wavetable-instruments/upload/master/donations";
+let libraryIndex = null;
+const donateOffers = new Map();          // instrument name -> { result, desc, match }
+
+const esc = (s) => String(s === undefined ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function verdictCell(match) {
+  if (match.verdict === "identical")
+    return "<span class='warn'>already in the library</span> <span class='dim'>as " +
+      esc(match.of) + "</span>";
+  if (match.verdict === "variant")
+    return "<span class='warn'>looks like a variant</span> <span class='dim'>of " + esc(match.of) +
+      ", " + match.matched + " of " + match.mine + " frames match</span>";
+  return "<span class='ok'>new</span> <span class='dim'>nothing close in the library</span>";
+}
+
+async function checkAgainstLibrary() {
+  const panel = document.getElementById("donatePanel");
+  const status = document.getElementById("donateStatus");
+  if (!results.length) return;
+  panel.style.display = "block";
+  const usable = results.filter((r) => r.samples && r.samples.length);
+  if (!usable.length) {
+    status.innerHTML = "<span class='err'>nothing to check: the builder did not hand back frames</span>";
+    return;
+  }
+  try {
+    status.textContent = "loading the library index…";
+    libraryIndex = libraryIndex || await WTHash.loadIndex((n) => {
+      status.textContent = "read " + n + " already-published instruments";
+    });
+  } catch (e) {
+    status.innerHTML = "<span class='err'>duplicate check unavailable: " + esc(e.message) +
+      "</span> &mdash; you can still donate, the repository checks again on arrival.";
+    return;
+  }
+
+  const catSelect = document.getElementById("donateCat");
+  if (catSelect.options.length <= 1) {
+    const cats = [...new Set(libraryIndex.instruments.map((i) => i.category))]
+      .filter((c) => c && c !== "(flat)").sort();
+    for (const c of cats) catSelect.insertAdjacentHTML("beforeend", "<option>" + esc(c) + "</option>");
+  }
+
+  donateOffers.clear();
+  const tbody = document.getElementById("donateRows");
+  tbody.innerHTML = "";
+  status.textContent = "checking " + usable.length + " against " + libraryIndex.count + "…";
+  for (const r of usable) {
+    const desc = WTHash.descriptor(r.samples);
+    const match = WTHash.compare(libraryIndex, desc);
+    donateOffers.set(r.name, { result: r, desc, match });
+    const include = match.verdict !== "identical";
+    tbody.insertAdjacentHTML("beforeend",
+      "<tr><td><input type='checkbox' data-offer=\"" + esc(r.name) + "\"" +
+      (include ? " checked" : "") + "></td>" +
+      "<td>" + esc(r.name) + "</td>" +
+      "<td>" + verdictCell(match) + "</td>" +
+      "<td class='num'>" + desc.frames + " &times; " + desc.cycle + "</td></tr>");
+  }
+  tbody.querySelectorAll("[data-offer]").forEach((c) =>
+    c.addEventListener("change", updateDonateUi));
+  const fresh = [...donateOffers.values()].filter((o) => o.match.verdict !== "identical").length;
+  status.textContent = fresh
+    ? fresh + " of " + donateOffers.size + " would be new to the library. Tick what to send."
+    : "everything you built is already in the library.";
+  updateDonateUi();
+}
+
+function selectedOffers() {
+  const chosen = new Set([...document.querySelectorAll("[data-offer]")]
+    .filter((c) => c.checked).map((c) => c.dataset.offer));
+  return [...donateOffers.entries()].filter(([name]) => chosen.has(name)).map(([, o]) => o);
+}
+
+function updateDonateUi() {
+  const consent = document.getElementById("consent").checked;
+  const chosen = selectedOffers();
+  document.getElementById("donate").disabled = !(consent && chosen.length);
+  document.getElementById("uploadPage").disabled = !document.getElementById("donateNote").dataset.ready;
+  document.getElementById("donateHint").textContent = chosen.length
+    ? chosen.length + " selected · " + libraryIndex.count + " instruments published"
+    : "nothing selected";
+}
+
+document.getElementById("consent").addEventListener("change", updateDonateUi);
+
+document.getElementById("donate").addEventListener("click", async () => {
+  const chosen = selectedOffers();
+  if (!chosen.length) return;
+  const note = document.getElementById("donateNote");
+  note.textContent = "packing…";
+  const donor = document.getElementById("donor").value.trim();
+  const category = document.getElementById("donateCat").value;
+  const manifest = {
+    tool: "renoise-wavetable-tools browser builder",
+    tool_url: "https://mene311.github.io/renoise-wavetable-tools/",
+    donor: donor || "(anonymous)",
+    created: new Date().toISOString(),
+    category: category || "(let the library pick)",
+    terms: "offered to the library under the same terms as the rest of it",
+    instruments: [],
+  };
+  const entries = [];
+  for (const offer of chosen) {
+    const bytes = new Uint8Array(await offer.result.blob.arrayBuffer());
+    const file = offer.result.name;
+    entries.push({ name: file, data: bytes });
+    manifest.instruments.push({
+      file,
+      frames: offer.desc.frames,
+      cycle: offer.desc.cycle,
+      key: offer.desc.key,
+      shapes: btoa(String.fromCharCode(...offer.desc.keys.flatMap((k) => [...k]))),
+      check: offer.match.verdict,
+      closest: offer.match.of || null,
+    });
+  }
+  entries.push({
+    name: "donation.json",
+    data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
+  });
+  const zip = WT.zipStore(entries);
+  const blob = new Blob([zip], { type: "application/zip" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "wavetable-donation-" + new Date().toISOString().slice(0, 10) + ".zip";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  note.dataset.ready = "1";
+  note.innerHTML = "<span class='ok'>" + esc(a.download) + "</span> (" +
+    chosen.length + " instrument" + (chosen.length === 1 ? "" : "s") + ", " +
+    (zip.length / 1024).toFixed(0) + " KB) &mdash; now use the upload page.";
+  updateDonateUi();
+});
+
+document.getElementById("uploadPage").addEventListener("click", () => {
+  window.open(UPLOAD_URL, "_blank", "noopener");
 });
 </script>
 </body>
