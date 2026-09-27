@@ -534,3 +534,80 @@ manifest at the archive root, `<Id>` matching the filename, `main.lua` compiling
 The hub is the index, so **it dictates the shape**: one repo per thing, flat, with the
 counts coming from a tree walk. Anything grouped into a container repo is invisible to it.
 Check `build.py` before choosing a repo layout for anything meant to appear on the hub.
+
+---
+
+# 2026-09-27 — the Renoise tool was slicing frames mid-cycle
+
+## The bug
+
+Reported: "bounded by 12 steps, what happens when the wavetable has many frames is not
+splicing at the zero crossing thus creating sharp sounds." Correct on both counts.
+
+`renoise-tool/main.lua`, `read_frames`:
+
+```lua
+local frame_length = math.floor(total / frame_count)
+```
+
+It assumed the table holds exactly `frame_count` frames. A 256-frame table built at 12
+frames gives **43690-sample blocks — 21.33 source frames, straddling 85 cycles.** Every
+slice starts and ends mid-cycle, so every gate step is a discontinuity. And no frame was
+sliced to a single cycle, so a frame holding 4 cycles played 4× high. The tool *detected*
+that second problem and only warned: *"frames cross zero up to N times … the instrument
+will sound sharp."*
+
+Measured before/after on one 256×2048 4-cycle table (`tests/old_vs_new.lua`):
+
+| | old | new |
+|---|---|---|
+| block | 43,690 samples (85.33 cycles) | 512 samples (exactly 1 cycle) |
+| frame size found | none, `floor(total/12)` | 2048, the real size |
+
+## The fix
+
+`wtlib.lua` gained the DSP, ported from `wt_xrni.py` semantics: radix-2 FFT,
+`detect_cycles`, `table_cycles`, `one_cycle`, `find_frame_size`, `bandlimit_resample`,
+`select_frames`. `main.lua` slices one cycle per frame and resamples to a common length.
+
+**Two approaches were tried and one was wrong — do not retry them.**
+
+1. **GCD of spectral bins** (what `wt_xrni.py` does) **does not port.** A 192-sample
+   frame holding 3 cycles must be zero-padded to 256 for a radix-2 FFT, and the padding
+   leaks energy into bins 1, 2, 4, 5, 7, 10, 11 — GCD 1. A genuinely 3-cycle frame reads
+   as one cycle. `detect_cycles` instead tests candidate divisors against the waveform
+   directly: exact, and independent of length.
+2. **Inferring the frame size from periodicity does not work either.** A table of N
+   single-cycle frames is *indistinguishable* from 2N half-cycle frames when the waveform
+   is symmetric (a sine is): both loop cleanly, both preserve slope across the seam. There
+   is no evidence in the audio. It confidently returned half the right size. The answer is
+   the Python tool's rule — largest standard size dividing the sample evenly, 2048 first —
+   which has no ambiguity. Both mistakes are documented in the code.
+
+Resampling is `bandlimit_resample` (spectral truncation, so dropped harmonics are
+discarded rather than folded back as aliasing). Two things bit me there: the gain is
+`dst/m`, not `m/dst` (measured: m=64→dst=256 uncorrected gives p2p 0.5 where 2.0 is
+wanted), and a DC step is removed afterwards or the loop point clicks.
+
+## Tests — both failures were silent, so they need known answers
+
+`./tests/run.sh` runs four suites, all green:
+
+- `load_test.lua` (6) — the tool under a stubbed API.
+- `dsp_test.lua` (31) — detection at 2/3/4/8 cycles and at non-power-of-two lengths,
+  one-cycle averaging, resampling that drops rather than aliases.
+- `cycle_pipeline_test.lua` — 256-frame 4-cycle table end to end; asserts every written
+  frame is one cycle and all share a length.
+- `old_vs_new.lua` — the same table through both, printed side by side as the record.
+
+Two test-authoring traps worth keeping: a *harmonically rich* single cycle legitimately
+crosses zero more than once, so `count_upward_crossings` must **not** be asserted on —
+`detect_cycles` is the measure. And `sine(cycles, ppc)` in the harness returns
+`cycles × ppc` samples, which is easy to misread when writing expectations.
+
+## State
+
+Tool version **3 → 4**, `.xrnx` rebuilt, pushed (`fb142ec`). The install at
+`~/.config/Renoise/V3.5.4/Scripts/Tools/com.meneses.WavetableBuilder.xrnx` is a symlink to
+`renoise-tool/`, so Renoise picks the fix up on the next reload. **Still not heard in a
+live Renoise** — verified structurally and by measurement only, same caveat as before.
