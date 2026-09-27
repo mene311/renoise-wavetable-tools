@@ -2,7 +2,7 @@
 <RenoiseScriptingTool doc_version="0">
   <ApiVersion>6.2</ApiVersion>
   <Id>com.meneses.WavetableBuilder</Id>
-  <Version>3</Version>
+  <Version>4</Version>
   <Author>Jesús Meneses</Author>
   <Name>Wavetable Instrument Builder</Name>
   <Category>Instrument</Category>

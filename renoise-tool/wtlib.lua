@@ -66,6 +66,304 @@ function WTLib.count_upward_crossings(frame)
   return crossings
 end
 
+-----------------------------------------------------------------------------
+-- Cycle analysis: finding the period a frame actually holds, and slicing to it.
+--
+-- Why this exists. A wavetable file is a run of frames, but Renoise's sample buffer
+-- exposes only number_of_frames and sample_rate -- no frame size, no file metadata. So
+-- the builder cannot know where one frame ends; it has to work it out.
+--
+-- Chopping the buffer into n equal blocks is wrong whenever the table does not hold n
+-- frames. A 256-frame table built at 12 frames gives blocks of 21.33 frames: every slice
+-- lands mid-cycle, and the instrument crackles. And if a frame holds several cycles the
+-- pitch is multiplied by that count, so it also plays sharp.
+--
+-- So: find the period from the spectrum, slice exactly one cycle, and resample that cycle
+-- to a common length. The Python builder (wt_xrni.py) has done this all along in
+-- detect_cycles / one_cycle / bandlimit_resample; these are the same three operations in
+-- Lua, kept deliberately in step with it.
+-----------------------------------------------------------------------------
+
+-- In-place iterative radix-2 FFT. n must be a power of two. Used only for analysis
+-- (cycle detection and resampling), never to store a frame, so the cost is fine.
+local function fft(re, im, inverse)
+  local n = #re
+  -- bit-reversal permutation
+  local j = 1
+  for i = 1, n - 1 do
+    if i < j then
+      re[i], re[j] = re[j], re[i]
+      im[i], im[j] = im[j], im[i]
+    end
+    local m = math.floor(n / 2)
+    while m >= 1 and j > m do
+      j = j - m
+      m = math.floor(m / 2)
+    end
+    j = j + m
+  end
+  local len = 2
+  while len <= n do
+    local ang = (inverse and 2 or -2) * math.pi / len
+    local wr, wi = math.cos(ang), math.sin(ang)
+    local half = math.floor(len / 2)
+    for i = 1, n, len do
+      local cr, ci = 1.0, 0.0
+      for k = 0, half - 1 do
+        local a, b = i + k, i + k + half
+        local tr = re[b] * cr - im[b] * ci
+        local ti = re[b] * ci + im[b] * cr
+        re[b], im[b] = re[a] - tr, im[a] - ti
+        re[a], im[a] = re[a] + tr, im[a] + ti
+        local ncr = cr * wr - ci * wi
+        ci = cr * wi + ci * wr
+        cr = ncr
+      end
+    end
+    len = len * 2
+  end
+  if inverse then
+    for i = 1, n do re[i], im[i] = re[i] / n, im[i] / n end
+  end
+end
+
+local function next_pow2(n)
+  local p = 1
+  while p < n do p = p * 2 end
+  return p
+end
+
+-- How many cycles does this frame hold?
+--
+-- The obvious approach is the GCD of the frame's significant spectral bins, and that is
+-- what the Python builder does. It works when the frame length is a power of two, but it
+-- breaks otherwise: a 192-sample frame holding 3 cycles has to be zero-padded to 256 for
+-- a radix-2 FFT, and the padding leaks energy into bins 1, 2, 4, 5, 7, 10, 11. Their GCD
+-- is 1, so a genuinely 3-cycle frame is reported as a single cycle and then plays three
+-- times too high.
+--
+-- So test the candidates directly instead. A frame holds `c` cycles iff it is made of `c`
+-- identical repeats, so for each plausible divisor `c` compare the repeats against each
+-- other. That is exact, it needs no transform, and it does not care about the length.
+--
+-- `rel` is the tolerance: how far a sample may sit from the repeat average, as a fraction
+-- of the frame's peak-to-peak, and still count as a repeat.
+function WTLib.detect_cycles(frame, rel)
+  rel = rel or 0.02
+  local n = #frame
+  if n < 4 then return 1 end
+
+  local lo, hi = math.huge, -math.huge
+  for i = 1, n do
+    local v = frame[i]
+    if v < lo then lo = v end
+    if v > hi then hi = v end
+  end
+  local span = hi - lo
+  if span < 1e-9 then return 1 end       -- silence (or a constant): one cycle, by convention
+  local tol = rel * span
+
+  -- Largest candidate first: a frame of 16 repeats is also 8 and 4 and 2, and the largest
+  -- is the one that describes it.
+  for c = math.floor(n / 2), 2, -1 do
+    if n % c == 0 then
+      local seg = math.floor(n / c)
+      local worst = 0.0
+      for i = 1, seg do
+        local ref = frame[i]
+        for r = 1, c - 1 do
+          local d = math.abs(frame[r * seg + i] - ref)
+          if d > worst then worst = d end
+        end
+        -- one bad repeat disqualifies the candidate
+        if worst > tol then break end
+      end
+      if worst <= tol then return c end
+    end
+  end
+  return 1
+end
+
+-- One cycle count for a whole table. Frames of a table share a pitch, so the common value
+-- wins; a lone odd frame is noise rather than a different pitch, so it is ignored unless
+-- at least half the frames agree (and there are two of them to agree).
+function WTLib.table_cycles(frames)
+  local counts, n = {}, #frames
+  for i = 1, n do
+    local c = WTLib.detect_cycles(frames[i])
+    counts[c] = (counts[c] or 0) + 1
+  end
+  local best, best_n = 1, 0
+  for c, k in pairs(counts) do
+    if k > best_n then best, best_n = c, k end
+  end
+  if best > 1 and best_n >= math.max(2, math.floor(n / 2)) then return best end
+  return 1
+end
+
+-- What frame size is this wavetable authored at?
+--
+-- This deliberately mirrors frames_from_serum_wav() in wt_xrni.py: take the LARGEST standard
+-- size that divides the sample evenly, with at least two frames. No test of the audio.
+--
+-- An earlier attempt here inferred the size by asking whether candidate blocks each held a
+-- whole number of cycles. It cannot work, and it is worth recording why so nobody tries it
+-- again: a table of N single-cycle frames is indistinguishable from one of 2N half-cycle
+-- frames whenever the waveform is symmetric about its midpoint (a sine is). Both sizes loop
+-- cleanly and both preserve the slope across the seam, so the audio contains no evidence
+-- separating them. Guessing there produces a confidently wrong half-size.
+--
+-- Largest-first is what the Python builder does, and matching it is the point: this tool and
+-- that one must agree on the frames they produce, or a table built here and there will not
+-- sound the same.
+--
+-- Note 2048 before 4096: a 4096-sample "frame" is far more likely to be two 2048 frames, so
+-- treating it as one is the riskier reading. That ordering is the Python tool's too.
+--
+-- Returns the size, or nil when the length fits nothing standard.
+function WTLib.find_frame_size(samples, candidates)
+  local total = #samples
+  if total < 8 then return nil end
+
+  candidates = candidates or { 2048, 4096, 1024, 512, 256, 128, 64 }
+  for _, size in ipairs(candidates) do
+    if total % size == 0 and math.floor(total / size) >= 2 then return size end
+  end
+
+  -- Nothing standard. Accept any divisor with at least a handful of frames, largest first,
+  -- so an unusual table still builds. The 4-frame floor is what stops a short fragment of
+  -- audio -- which is not a wavetable at all -- being chopped into two random halves.
+  for size = math.floor(total / 2), 32, -1 do
+    if total % size == 0 and math.floor(total / size) >= 4 then return size end
+  end
+  return nil
+end
+
+-- Do the frames of this size line up as whole cycles? See find_frame_size: the loop-point
+-- test alone cannot separate a cycle from half of one, so this is a diagnostic rather than
+-- the way the frame size is chosen. Kept because it is cheap and it tells the report when a
+-- table is not looping cleanly, which is worth saying out loud.
+function WTLib.frames_are_periodic(samples, size, rel)
+  rel = rel or 0.05
+  local total = #samples
+  local count = math.floor(total / size)
+  if count < 2 or size < 4 then return false end
+
+  local lo, hi = math.huge, -math.huge
+  for i = 1, total do
+    local v = samples[i]
+    if v < lo then lo = v end
+    if v > hi then hi = v end
+  end
+  local span = hi - lo
+  if span < 1e-9 then return false end
+
+  local step = 0.0
+  for f = 1, count do
+    step = step + math.abs(samples[(f - 1) * size + 1] - samples[f * size])
+  end
+  return (step / count) <= rel * span
+end
+
+-- Choose `n` frames from a table, spread evenly so the sweep covers the whole source.
+-- Returns the chosen frames and their indices.
+function WTLib.select_frames(frames, n)
+  local have = #frames
+  if have == 0 then return {}, {} end
+  if n >= have then
+    local all, idx = {}, {}
+    for i = 1, have do all[i], idx[i] = frames[i], i end
+    return all, idx
+  end
+  if n <= 1 then return { frames[1] }, { 1 } end
+
+  -- even spacing, including both ends: for 4 of 10 take 1, 4, 7, 10 rather than 1, 3, 6, 10
+  local out, idx = {}, {}
+  for k = 1, n do
+    local i = math.floor((k - 1) * (have - 1) / (n - 1)) + 1
+    out[k], idx[k] = frames[i], i
+  end
+  return out, idx
+end
+
+-- Slice a frame down to exactly one cycle, averaging the repeats so that noise and
+-- quantisation cancel. Averaging is what the Python builder does too; it is why a table
+-- that merely repeats the same cycle gains a little resolution from the slice rather than
+-- losing it.
+function WTLib.one_cycle(frame, cycles)
+  local g = math.floor(cycles or WTLib.detect_cycles(frame))
+  if g <= 1 then return frame end
+  local n = math.floor(#frame / g)
+  if n <= 1 then return frame end
+  local out = {}
+  for t = 1, n do out[t] = 0.0 end
+  for part = 0, g - 1 do
+    for t = 1, n do
+      out[t] = out[t] + frame[part * n + t]
+    end
+  end
+  for t = 1, n do out[t] = out[t] / g end
+  return out
+end
+
+-- Resample one cycle to `n_out` samples by truncating the spectrum, which keeps every
+-- harmonic that fits below the new Nyquist and drops the rest. That is the point: naive
+-- interpolation would fold the discarded harmonics back down as aliasing.
+function WTLib.bandlimit_resample(cyc, n_out)
+  local n = #cyc
+  if n < 2 or n_out < 2 then return cyc end
+  if n == n_out then
+    local copy = {}
+    for i = 1, n do copy[i] = cyc[i] end
+    return copy
+  end
+
+  -- Forward transform of the source cycle over `m` points.
+  local m = next_pow2(n)
+  local re, im = {}, {}
+  for i = 1, m do re[i], im[i] = (i <= n and cyc[i] or 0.0), 0.0 end
+  fft(re, im, false)
+
+  -- Copy the spectrum into a transform of `dst` points, keeping only the harmonics that
+  -- fit below the destination's Nyquist. That truncation is what avoids aliasing: naive
+  -- interpolation would fold the discarded harmonics back down instead of dropping them.
+  local dst = next_pow2(n_out)
+  local keep = math.min(math.floor(n_out / 2), math.floor(n / 2))
+  local ore, oim = {}, {}
+  for i = 1, dst do ore[i], oim[i] = 0.0, 0.0 end
+
+  -- bin 0 (DC) and the positive bins
+  for b = 0, keep do
+    ore[b + 1], oim[b + 1] = re[b + 1], im[b + 1]
+  end
+  -- the matching negative bins, so the inverse transform comes back real. Counting down
+  -- from dst - 1 mirrors bin b onto dst - b; b = 0 has no mirror (it is its own).
+  for b = 1, keep do
+    ore[dst - b + 1], oim[dst - b + 1] = re[b + 1], -im[b + 1]
+  end
+
+  -- Without this the level is wrong by dst/m: the inverse transform divides by the length
+  -- it was given, and that length is not the one the source energy was summed over. A
+  -- zero-padded copy into a longer transform comes back low by exactly dst/m, so upsample
+  -- by 4x and a unit sine returns at 0.5. Measured: m=64 -> dst=256 with no correction
+  -- gives peak-to-peak 0.5 where 2.0 is wanted, i.e. gain = 4.0 = dst/m.
+  local gain = dst / m
+  for i = 1, dst do ore[i], oim[i] = ore[i] * gain, oim[i] * gain end
+
+  fft(ore, oim, true)
+
+  -- Resampling by truncation can leave a DC step at the loop point (the cycle no longer
+  -- starts and ends at the same value), and a step is a click on every repeat. Removing
+  -- the mean costs nothing and keeps the splice quiet.
+  local mean = 0
+  for i = 1, n_out do mean = mean + ore[i] end
+  mean = mean / n_out
+
+  local out = {}
+  for i = 1, n_out do out[i] = ore[i] - mean end
+  return out
+end
+
 -- WAV ------------------------------------------------------------------------------
 
 -- 16 bit mono PCM, which is what the Python builder embeds too (as 16 bit FLAC).

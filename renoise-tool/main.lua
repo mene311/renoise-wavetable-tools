@@ -39,9 +39,23 @@ local function fmt(x, digits)
   return string.format("%." .. (digits or 3) .. "f", x)
 end
 
--- Read the first sample of the selected instrument as a wavetable and chop it into frames.
+-- Read the first sample of the selected instrument as a wavetable and take `frame_count`
+-- single cycles out of it.
+--
+-- The old version assumed the table was exactly `frame_count` frames and sliced the buffer
+-- into equal blocks of floor(total / frame_count). That is wrong for any table whose real
+-- frame count is not the one asked for: a 256-frame table built at 12 frames gives blocks
+-- of 21.33 frames, so every slice lands mid-cycle and the instrument crackles. And a frame
+-- holding several cycles plays that many times too high.
+--
+-- Renoise's sample buffer exposes only number_of_frames and sample_rate -- no frame size
+-- and no file metadata -- so the native frame size has to be inferred. It is the largest
+-- divisor of the total that divides evenly into single cycles (see find_frame_size).
+-- Everything downstream then works in whole cycles, which is what makes the result in tune
+-- and click-free regardless of how the table was authored.
+--
 -- Returns frames, info, or nil plus a message.
-local function read_frames(frame_count, explicit_sample)
+local function read_frames(frame_count, explicit_sample, cycle_len)
   local song = renoise.song()
   local sample = explicit_sample or song.selected_sample
   if not sample then
@@ -57,23 +71,51 @@ local function read_frames(frame_count, explicit_sample)
     return nil, "The selected sample is too short to hold frames."
   end
   local channels = buffer.number_of_channels
-  local frame_length = math.floor(total / frame_count)
-  if frame_length < 4 then
-    return nil, "Not enough audio for " .. frame_count .. " frames."
-  end
-  local used = frame_length * frame_count
   local base = 1                 -- buffer indices are documented as 1..number_of_frames
 
-  local frames = {}
-  for i = 1, frame_count do
-    local frame = {}
-    for f = 1, frame_length do
-      local index = (i - 1) * frame_length + (f - 1) + base
-      local v = read_scalar(buffer:sample_data(1, index)) or 0
-      frame[f] = v
-    end
-    frames[i] = frame
+  -- The whole buffer, once. Everything else is a window onto this.
+  local all = {}
+  for i = 1, total do
+    all[i] = read_scalar(buffer:sample_data(1, (i - 1) + base)) or 0
   end
+
+  local native = WTLib.find_frame_size(all)
+  if not native or native < 4 then
+    return nil, "Could not find a frame size in this sample. Is it a wavetable?"
+  end
+
+  -- Native frames, each sliced to a single cycle and averaged over its repeats.
+  local native_count = math.floor(total / native)
+  local cycles = nil
+  local single = {}
+  for i = 1, native_count do
+    local frame = {}
+    for f = 1, native do frame[f] = all[(i - 1) * native + f] end
+    -- One cycle count for the whole table, taken from a frame that carries more than one,
+    -- so a table of many cycles is sliced consistently rather than frame by frame.
+    if not cycles then
+      local c = WTLib.detect_cycles(frame)
+      if c > 1 then cycles = c end
+    end
+    single[i] = frame
+  end
+  cycles = cycles or 1
+  for i = 1, native_count do
+    single[i] = WTLib.one_cycle(single[i], cycles)
+  end
+
+  -- Pick `frame_count` of them, spread across the table so the whole sweep is represented.
+  local picked, idxs = WTLib.select_frames(single, frame_count)
+
+  -- Resample every picked cycle to one common length, band-limited, so the frames share a
+  -- cycle length and therefore a pitch.
+  local out_len = cycle_len or #picked[1]
+  local frames = {}
+  for i = 1, #picked do
+    frames[i] = WTLib.bandlimit_resample(picked[i], out_len)
+  end
+
+  local used = native * native_count
 
   return frames, {
     name = sample.name or "wavetable",
@@ -82,8 +124,13 @@ local function read_frames(frame_count, explicit_sample)
     trimmed = total - used,
     sample_rate = rate,
     channels = channels,
-    frame_length = frame_length,
-    frame_count = frame_count,
+    frame_length = out_len,
+    frame_count = #frames,
+    -- what the analysis found, so the report can say so instead of hiding it
+    native_frame_size = native,
+    native_frame_count = native_count,
+    cycles_per_frame = cycles,
+    picked_indices = idxs,
   }
 end
 
@@ -212,6 +259,15 @@ show_result = function(report, message)
     local i, t = report.info, report.tuning
     text[#text + 1] = ("Frames:            %d x %d samples"):format(i.frame_count, i.frame_length)
     text[#text + 1] = ("Source:            %s, %d Hz, %d channel(s)"):format(i.name, i.sample_rate, i.channels)
+    text[#text + 1] = ("Table:             %d frames x %d samples in the source"):format(i.native_frame_count, i.native_frame_size)
+    if i.cycles_per_frame > 1 then
+      -- Worth saying: it explains why the reported frame length differs from the source's,
+      -- and it is the difference between playing at pitch and playing sharp.
+      text[#text + 1] = ("Cycles per frame:  %d (sliced to one before resampling)"):format(i.cycles_per_frame)
+    end
+    if i.frame_count < i.native_frame_count then
+      text[#text + 1] = ("Picked:            %d of %d frames, spread across the table"):format(i.frame_count, i.native_frame_count)
+    end
     text[#text + 1] = ("Used:              %d of %d samples"):format(i.used_frames, i.total_frames)
     if i.trimmed > 0 then
       text[#text + 1] = ("Note:              %d trailing samples dropped (length did not divide evenly)"):format(i.trimmed)
@@ -223,9 +279,12 @@ show_result = function(report, message)
     end
     text[#text + 1] = ("Sweep template:    %s"):format(report.with_sweep and "yes" or "no")
     text[#text + 1] = ("Written:           %s (%d KB)"):format(report.path, math.floor(report.bytes / 1024))
-    if report.max_crossings > 8 then
-      text[#text + 1] = ("Warning:           frames cross zero up to %d times, which usually means the"):format(report.max_crossings)
-      text[#text + 1] = "                   frames hold more than one cycle. The instrument will sound sharp."
+    if report.max_crossings > 1 then
+      -- Every frame should hold exactly one cycle by the time it is written. More than one
+      -- means the slicing did not take, so the instrument will play sharp. This used to be
+      -- the normal case and is now a bug worth shouting about.
+      text[#text + 1] = ("Warning:           a written frame still crosses zero %d times, so it holds"):format(report.max_crossings)
+      text[#text + 1] = "                   more than one cycle and the instrument will sound sharp."
     end
   end
   renoise.app():show_message(TOOL_NAME .. "\n\n" .. table.concat(text, "\n"))

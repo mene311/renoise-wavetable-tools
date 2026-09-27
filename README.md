@@ -110,6 +110,26 @@ It writes a file rather than building the instrument through the API because
 anything except a macro, so the mapping that walks the table has to exist in the file.
 `renoise-tool/README.md` covers the edge cases and what each one does.
 
+### How the tool finds the frames
+
+Renoise's sample buffer exposes only a length and a rate — no frame size and no file metadata —
+so the tool works the frame size out from the audio. It has to be right, or the instrument
+crackles.
+
+It takes the largest standard size that divides the sample evenly (2048, then 4096, then down),
+which is what `frames_from_serum_wav()` in `wt_xrni.py` does: the two builders must agree on the
+frames they produce. It then slices one cycle out of each frame and resamples that cycle to a
+common length, band-limited, so every frame is a single cycle and they all share a pitch.
+
+Without that, a table whose frames hold several cycles plays sharp by that factor, and a table
+whose real frame count differs from the one you asked for gets cut mid-cycle at every slice. Both
+failures are silent, which is why they went unnoticed: the instrument still builds.
+`tests/old_vs_new.lua` measures one such table — the old path cut it into 43,690-sample blocks
+straddling 85 cycles, the new one produces exact 512-sample single cycles.
+
+The tool reports what it found (source frame size, cycles per frame, frames picked), so a
+surprising table says so instead of just sounding wrong.
+
 
 ## No Python? Build them on GitHub
 
@@ -212,6 +232,22 @@ python3 tools/wt_hash.py --check ../some-instrument.xrni
 Some instruments play at a different pitch than the key you press. When the loudest part of
 the wave isn't the fundamental, the note comes out an octave or a twelfth away, and the top octaves get rough, since harmonics that no longer fit under Nyquist fold back down.
 Looping one cycle in a sampler does that.
+
+## Tests
+
+```bash
+./tests/run.sh          # every Lua test
+```
+
+- `load_test.lua` — loads the tool against a stubbed Renoise API, so a manifest or a syntax
+  error is caught without opening Renoise.
+- `dsp_test.lua` — the cycle analysis against shapes with known answers: cycle detection at
+  several counts and lengths, one-cycle extraction, and band-limited resampling, including that
+  it drops harmonics rather than folding them back as aliasing.
+- `cycle_pipeline_test.lua` — a 256-frame table, 4 cycles per frame, through the whole pipeline,
+  asserting every written frame is exactly one cycle and that they all share a length.
+- `old_vs_new.lua` — the same table through the old logic and the new, printed side by side. Not
+  an assertion; it is the quantitative record of why the slicing changed.
 
 ## Credits
 
